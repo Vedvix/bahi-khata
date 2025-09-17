@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
+//api integration imports
+// add alongside your other imports
+import { fetchInvestmentsAPI, createInvestmentAPI, updateInvestmentAPI, } from '../../service/investments';
+import { fetchLentAPI, createLentAPI, updateLentAPI, normalizeStatusForBackend } from '../../service/lent';
+
+
+
 export interface Transaction {
   id: string;
   type: 'income' | 'expense' | 'investment' | 'lend';
@@ -302,21 +309,68 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
 
   // Load data from localStorage on mount
+  // useEffect investments added other left
   useEffect(() => {
-    const loadedTransactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions);
-    const loadedInvestments = loadFromStorage(STORAGE_KEYS.INVESTMENTS, sampleInvestments);
-    const loadedLendRecords = loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords);
-    const loadedEMIs = loadFromStorage(STORAGE_KEYS.EMIS, sampleEMIs);
-    const loadedSubscriptions = loadFromStorage(STORAGE_KEYS.SUBSCRIPTIONS, sampleSubscriptions);
-    const loadedCategories = loadFromStorage(STORAGE_KEYS.CATEGORIES, defaultCategories);
+    let mounted = true;
 
-    setTransactions(loadedTransactions);
-    setInvestments(loadedInvestments);
-    setLendRecords(loadedLendRecords);
-    setEMIs(loadedEMIs);
-    setSubscriptions(loadedSubscriptions);
-    setCategories(loadedCategories);
+    const loadAll = async () => {
+      // Load everything from localStorage first (so UI shows quickly)
+      const loadedTransactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions);
+      const loadedLendRecords = loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords);
+      const loadedEMIs = loadFromStorage(STORAGE_KEYS.EMIS, sampleEMIs);
+      const loadedSubscriptions = loadFromStorage(STORAGE_KEYS.SUBSCRIPTIONS, sampleSubscriptions);
+      const loadedCategories = loadFromStorage(STORAGE_KEYS.CATEGORIES, defaultCategories);
+
+      if (!mounted) return;
+      setTransactions(loadedTransactions);
+      setLendRecords(loadedLendRecords);
+      setEMIs(loadedEMIs);
+      setSubscriptions(loadedSubscriptions);
+      setCategories(loadedCategories);
+
+      // Investments: try API, fallback to localStorage/sample
+      try {
+        const data = await fetchInvestmentsAPI({ page: 1, size: 100 });
+        if (!mounted) return;
+
+        const investmentsList = Array.isArray(data) ? data : (data?.investments ?? []);
+        if (investmentsList && investmentsList.length > 0) {
+          setInvestments(investmentsList);
+        } else {
+          setInvestments(loadFromStorage(STORAGE_KEYS.INVESTMENTS, sampleInvestments));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch investments from API, using local data', err);
+        if (!mounted) return;
+        setInvestments(loadFromStorage(STORAGE_KEYS.INVESTMENTS, sampleInvestments));
+      }
+
+      // Lent money: try API, fallback to localStorage/sample
+      try {
+        const data = await fetchLentAPI({ page: 1, size: 100 });
+        if (!mounted) return;
+
+        const lentList = Array.isArray(data) ? data : (data?.lent ?? []);
+        if (lentList && lentList.length > 0) {
+          setLendRecords(lentList);
+        } else {
+          setLendRecords(loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch lent money from API, using local data', err);
+        if (!mounted) return;
+        setLendRecords(loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords));
+      }
+    };
+
+    loadAll();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+
 
   // Save to localStorage whenever data changes
   useEffect(() => {
@@ -351,33 +405,175 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     setTransactions(prev => [newTransaction, ...prev]);
   };
 
-  const addInvestment = (investment: Omit<Investment, 'id'>) => {
-    const newInvestment = {
-      ...investment,
-      id: Date.now().toString(),
-    };
-    setInvestments(prev => [...prev, newInvestment]);
+  //add investment(api integration)
+// Add investment -> POST /investments (optimistic local create, then reconcile with server)
+  const addInvestment = async (investment: Omit<Investment, 'id'>) => {
+    // optimistic local create so UI isn't blocked
+    const temp: Investment = { ...investment, id: Date.now().toString() };
+    setInvestments(prev => [...prev, temp]);
+
+    try {
+      // map frontend fields to backend expected payload (purchaseDate -> startDate)
+      const payload = {
+        name: investment.name,
+        type: investment.type,
+        amount: investment.amount,
+        currentValue: investment.currentValue ?? 0,
+        startDate: investment.purchaseDate, // backend expects startDate
+        maturityDate: investment.maturityDate ?? null,
+        returns: investment.returns ?? 0,
+      };
+      const created = await createInvestmentAPI(payload);
+      // Replace the optimistic item with server result
+      setInvestments(prev => prev.map(i => (i.id === temp.id ? created : i)));
+      return created;
+    } catch (err) {
+      console.warn('addInvestment: API failed, kept local version', err);
+      // keep optimistic item (already added) and return it
+      const local = investments.find(i => i.id === temp.id) ?? temp;
+      return local;
+    }
   };
 
-  const addLendRecord = (lendRecord: Omit<LendRecord, 'id'>) => {
-    const newLendRecord = {
+// Api integration(lent money add function)
+// Add lend record -> POST /lent (optimistic local create)
+  const addLendRecord = async (lendRecord: Omit<LendRecord, 'id'>) => {
+    const temp: LendRecord = {
       ...lendRecord,
       id: Date.now().toString(),
     };
-    setLendRecords(prev => [...prev, newLendRecord]);
+    // optimistic local add
+    setLendRecords(prev => [...prev, temp]);
+
+    try {
+      // map frontend -> backend payload
+      const payload = {
+        borrowerName: lendRecord.borrowerName,
+        principalAmount: lendRecord.amount,
+        interestRate: lendRecord.interestRate ?? null,
+        lentDate: lendRecord.lendDate ?? null,
+        dueDate: lendRecord.dueDate,
+        totalAmount: (lendRecord.remainingAmount ?? lendRecord.amount) + (lendRecord.paidAmount ?? 0),
+        status: (normalizeStatusForBackend(lendRecord.status) ?? 'active'),
+      };
+      const created = await createLentAPI(payload);
+      // map server row back to frontend shape
+      const mapped = {
+        id: created.id?.toString(),
+        borrowerName: created.borrowerName ?? '',
+        amount: created.principalAmount ?? 0,
+        lendDate: created.lentDate ?? null,
+        dueDate: created.dueDate ?? null,
+        interestRate: created.interestRate ?? 0,
+        purpose: created.purpose ?? '',
+        status: (created.status ?? 'Active').toLowerCase(),
+        paidAmount: created.paidAmount ?? 0,
+        remainingAmount:
+          (typeof created.totalAmount === 'number' ? created.totalAmount : (created.principalAmount ?? 0)) - (created.paidAmount ?? 0),
+      };
+      // replace temp item with server result
+      setLendRecords(prev => prev.map(l => (l.id === temp.id ? mapped : l)));
+      return mapped;
+    } catch (err) {
+      console.warn('addLendRecord: API failed, kept local version', err);
+      // keep optimistic local item
+      const local = lendRecords.find(l => l.id === temp.id) ?? temp;
+      return local;
+    }
   };
 
-  const updateInvestment = (id: string, updatedInvestment: Partial<Investment>) => {
-    setInvestments(prev =>
-      prev.map(inv => (inv.id === id ? { ...inv, ...updatedInvestment } : inv))
-    );
+//update investment(api integration)
+// Update investment -> PUT /investments/:id (optimistic update then reconcile)
+  const updateInvestment = async (id: string, updatedInvestment: Partial<Investment>) => {
+    // optimistic local update
+    setInvestments(prev => prev.map(inv => (inv.id === id ? { ...inv, ...updatedInvestment } : inv)));
+
+    try {
+      // Map frontend fields to backend expected (purchaseDate -> startDate)
+      const payload: any = {};
+      if (updatedInvestment.name !== undefined) payload.name = updatedInvestment.name;
+      if (updatedInvestment.type !== undefined) payload.type = updatedInvestment.type;
+      if (updatedInvestment.amount !== undefined) payload.amount = updatedInvestment.amount;
+      if (updatedInvestment.currentValue !== undefined) payload.currentValue = updatedInvestment.currentValue;
+      if (updatedInvestment.purchaseDate !== undefined) payload.startDate = updatedInvestment.purchaseDate;
+      if (updatedInvestment.maturityDate !== undefined) payload.maturityDate = updatedInvestment.maturityDate;
+      if (updatedInvestment.returns !== undefined) payload.returns = updatedInvestment.returns;
+
+      const updated = await updateInvestmentAPI(id, payload);
+      // replace with server-canonical row
+      setInvestments(prev => prev.map(inv => (inv.id === id ? updated : inv)));
+      return updated;
+    } catch (err) {
+      console.warn('updateInvestment: API failed; kept optimistic local update', err);
+      // return local item after optimistic update
+      const local = investments.find(i => i.id === id) ?? null;
+      return local;
+    }
   };
 
-  const updateLendRecord = (id: string, updatedLendRecord: Partial<LendRecord>) => {
-    setLendRecords(prev =>
-      prev.map(lend => (lend.id === id ? { ...lend, ...updatedLendRecord } : lend))
-    );
-  };
+
+// Update lend record -> PUT /lent/:id (optimistic update then reconcile)
+const updateLendRecord = async (id: string, updatedLendRecord: Partial<LendRecord>) => {
+  // Optimistic local update
+  setLendRecords(prev =>
+    prev.map(l => (l.id === id ? { ...l, ...updatedLendRecord } : l))
+  );
+
+  try {
+    const local = lendRecords.find(l => l.id === id);
+    if (!local) throw new Error("Local record not found");
+
+    // Prepare backend payload
+    const payload: any = {};
+
+    if (updatedLendRecord.borrowerName !== undefined) payload.borrowerName = updatedLendRecord.borrowerName;
+    if (updatedLendRecord.amount !== undefined) payload.principalAmount = updatedLendRecord.amount;
+    if (updatedLendRecord.interestRate !== undefined) payload.interestRate = updatedLendRecord.interestRate;
+    if (updatedLendRecord.lendDate !== undefined) payload.lentDate = updatedLendRecord.lendDate;
+    if (updatedLendRecord.dueDate !== undefined) payload.dueDate = updatedLendRecord.dueDate;
+
+    // totalAmount: calculate if paidAmount/remainingAmount provided, else fallback to previous
+    const paid = updatedLendRecord.paidAmount ?? local.paidAmount ?? 0;
+    const remaining = updatedLendRecord.remainingAmount ?? local.remainingAmount ?? 0;
+    payload.totalAmount = paid + remaining;
+
+    // Normalize status for backend
+    if (updatedLendRecord.status !== undefined) {
+      payload.status = normalizeStatusForBackend(updatedLendRecord.status) ?? 'Active';
+    }
+
+    // Call backend
+    const updated = await updateLentAPI(id, payload);
+
+    // Map server -> frontend shape
+    const mapped = {
+      id: updated.id?.toString(),
+      borrowerName: updated.borrowerName ?? '',
+      amount: updated.principalAmount ?? 0,
+      lendDate: updated.lentDate ?? null,
+      dueDate: updated.dueDate ?? null,
+      interestRate: updated.interestRate ?? 0,
+      purpose: updated.purpose ?? '',
+      status: (updated.status ?? 'Active').toLowerCase(),
+      paidAmount: updated.paidAmount ?? paid, // keep local if backend doesn't return
+      remainingAmount:
+        (typeof updated.totalAmount === 'number' ? updated.totalAmount : updated.principalAmount ?? 0) -
+        (updated.paidAmount ?? paid),
+    };
+
+    // Replace with server-canonical row
+    setLendRecords(prev => prev.map(l => (l.id === id ? mapped : l)));
+
+    return mapped;
+  } catch (err) {
+    console.warn('updateLendRecord: API failed; kept optimistic local update', err);
+    // Return local item after optimistic update
+    return lendRecords.find(l => l.id === id) ?? null;
+  }
+};
+
+
+
 
   const addEMI = (emi: Omit<EMI, 'id'>) => {
     const newEMI = {
