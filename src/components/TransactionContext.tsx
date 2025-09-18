@@ -4,7 +4,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 // add alongside your other imports
 import { fetchInvestmentsAPI, createInvestmentAPI, updateInvestmentAPI, } from '../../service/investments';
 import { fetchLentAPI, createLentAPI, updateLentAPI, normalizeStatusForBackend } from '../../service/lent';
-
+import { fetchSubscriptionsAPI, createSubscriptionAPI, updateSubscriptionAPI, deleteSubscriptionAPI } from '../../service/subscription'
+import { fetchTransactionsAPI, createTransactionAPI, updateTransactionAPI, deleteTransactionAPI } from '../../service/transactions';
 
 
 export interface Transaction {
@@ -41,6 +42,7 @@ export interface LendRecord {
   status: 'active' | 'partially_paid' | 'fully_paid' | 'overdue';
   paidAmount: number;
   remainingAmount: number;
+  totalAmount: number; 
 }
 
 export interface EMI {
@@ -253,7 +255,8 @@ const sampleLendRecords: LendRecord[] = [
     purpose: 'Business expansion',
     status: 'active',
     paidAmount: 0,
-    remainingAmount: 50000
+    remainingAmount: 50000,
+    totalAmount:0,
   },
   {
     id: '2',
@@ -265,7 +268,8 @@ const sampleLendRecords: LendRecord[] = [
     purpose: 'Medical emergency',
     status: 'partially_paid',
     paidAmount: 10000,
-    remainingAmount: 15000
+    remainingAmount: 15000,
+    totalAmount:0,
   },
 ];
 
@@ -361,6 +365,43 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         if (!mounted) return;
         setLendRecords(loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords));
       }
+
+      //Subscription data fetching
+            // Subscriptions: try API, fallback to localStorage/sample
+      try {
+        const subsResp = await fetchSubscriptionsAPI({ page: 1, size: 100 });
+        if (!mounted) return;
+
+        // fetchSubscriptionsAPI returns { total, page, size, subscriptions } (mapped to frontend shape)
+        const subsList = Array.isArray(subsResp) ? subsResp : (subsResp.subscriptions ?? subsResp);
+        if (subsList && subsList.length > 0) {
+          setSubscriptions(subsList);
+        } else {
+          setSubscriptions(loadFromStorage(STORAGE_KEYS.SUBSCRIPTIONS, sampleSubscriptions));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch subscriptions from API, using local data', err);
+        if (!mounted) return;
+        setSubscriptions(loadFromStorage(STORAGE_KEYS.SUBSCRIPTIONS, sampleSubscriptions));
+      }
+          // Transactions: try API, fallback to localStorage/sample
+      try {
+        const txResp = await fetchTransactionsAPI({ page: 1, size: 200 });
+        if (!mounted) return;
+
+        // txResp may be { total, page, size, transactions: [...] } or an array
+        const txList = Array.isArray(txResp) ? txResp : (txResp.transactions ?? txResp);
+        if (txList && txList.length > 0) {
+          setTransactions(txList);
+        } else {
+          setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
+        }
+      } catch (err) {
+        console.warn("Failed to fetch transactions from API; using local data", err);
+        if (!mounted) return;
+        setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
+      }
+
     };
 
     loadAll();
@@ -453,7 +494,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         interestRate: lendRecord.interestRate ?? null,
         lentDate: lendRecord.lendDate ?? null,
         dueDate: lendRecord.dueDate,
-        totalAmount: (lendRecord.remainingAmount ?? lendRecord.amount) + (lendRecord.paidAmount ?? 0),
+        //totalAmount: (lendRecord.remainingAmount ?? lendRecord.amount) + (lendRecord.paidAmount ?? 0),
         status: (normalizeStatusForBackend(lendRecord.status) ?? 'active'),
       };
       const created = await createLentAPI(payload);
@@ -470,6 +511,8 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         paidAmount: created.paidAmount ?? 0,
         remainingAmount:
           (typeof created.totalAmount === 'number' ? created.totalAmount : (created.principalAmount ?? 0)) - (created.paidAmount ?? 0),
+        totalAmount: created.totalAmount ?? (created.principalAmount ?? 0) + (created.paidAmount ?? 0),
+
       };
       // replace temp item with server result
       setLendRecords(prev => prev.map(l => (l.id === temp.id ? mapped : l)));
@@ -483,7 +526,6 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   };
 
 //update investment(api integration)
-// Update investment -> PUT /investments/:id (optimistic update then reconcile)
   const updateInvestment = async (id: string, updatedInvestment: Partial<Investment>) => {
     // optimistic local update
     setInvestments(prev => prev.map(inv => (inv.id === id ? { ...inv, ...updatedInvestment } : inv)));
@@ -512,84 +554,125 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   };
 
 
-// Update lend record -> PUT /lent/:id (optimistic update then reconcile)
-const updateLendRecord = async (id: string, updatedLendRecord: Partial<LendRecord>) => {
-  // Optimistic local update
-  setLendRecords(prev =>
-    prev.map(l => (l.id === id ? { ...l, ...updatedLendRecord } : l))
-  );
 
+const updateLendRecord = async (
+  id: string,
+  changes: Partial<LendRecord>
+): Promise<LendRecord | null> => {
   try {
-    const local = lendRecords.find(l => l.id === id);
-    if (!local) throw new Error("Local record not found");
+    // Find existing record in state
+    const existing = lendRecords.find(l => l.id === id);
+    if (!existing) throw new Error('Local record not found');
 
-    // Prepare backend payload
+    // Build backend payload (only send fields that actually changed)
     const payload: any = {};
 
-    if (updatedLendRecord.borrowerName !== undefined) payload.borrowerName = updatedLendRecord.borrowerName;
-    if (updatedLendRecord.amount !== undefined) payload.principalAmount = updatedLendRecord.amount;
-    if (updatedLendRecord.interestRate !== undefined) payload.interestRate = updatedLendRecord.interestRate;
-    if (updatedLendRecord.lendDate !== undefined) payload.lentDate = updatedLendRecord.lendDate;
-    if (updatedLendRecord.dueDate !== undefined) payload.dueDate = updatedLendRecord.dueDate;
+    if (changes.borrowerName !== undefined)
+      payload.borrowerName = changes.borrowerName;
 
-    // totalAmount: calculate if paidAmount/remainingAmount provided, else fallback to previous
-    const paid = updatedLendRecord.paidAmount ?? local.paidAmount ?? 0;
-    const remaining = updatedLendRecord.remainingAmount ?? local.remainingAmount ?? 0;
-    payload.totalAmount = paid + remaining;
+    if (changes.amount !== undefined)
+      payload.principalAmount = changes.amount;
 
-    // Normalize status for backend
-    if (updatedLendRecord.status !== undefined) {
-      payload.status = normalizeStatusForBackend(updatedLendRecord.status) ?? 'Active';
+    if (changes.interestRate !== undefined)
+      payload.interestRate = changes.interestRate;
+
+    if (changes.lendDate !== undefined)
+      payload.lentDate = changes.lendDate;
+
+    if (changes.dueDate !== undefined)
+      payload.dueDate = changes.dueDate;
+
+    if (changes.paidAmount !== undefined)
+      payload.paidAmount = changes.paidAmount;
+
+    // Normalize status → backend expects "Active" | "Paid" | "Overdue"
+    if (changes.status !== undefined) {
+      const normalized = normalizeStatusForBackend(changes.status);
+      if (normalized) payload.status = normalized;
     }
 
     // Call backend
     const updated = await updateLentAPI(id, payload);
 
-    // Map server -> frontend shape
-    const mapped = {
+    // Map backend → frontend shape
+    const mapped: LendRecord = {
       id: updated.id?.toString(),
       borrowerName: updated.borrowerName ?? '',
       amount: updated.principalAmount ?? 0,
       lendDate: updated.lentDate ?? null,
       dueDate: updated.dueDate ?? null,
       interestRate: updated.interestRate ?? 0,
-      purpose: updated.purpose ?? '',
       status: (updated.status ?? 'Active').toLowerCase(),
-      paidAmount: updated.paidAmount ?? paid, // keep local if backend doesn't return
-      remainingAmount:
-        (typeof updated.totalAmount === 'number' ? updated.totalAmount : updated.principalAmount ?? 0) -
-        (updated.paidAmount ?? paid),
+      paidAmount: updated.paidAmount ?? 0,
+      remainingAmount: updated.remainingAmount ?? Math.max(
+        (updated.totalAmount ?? 0) - (updated.paidAmount ?? 0),
+        0
+      ),
+      totalAmount: updated.totalAmount ?? (updated.principalAmount ?? 0) + (updated.paidAmount ?? 0),
+      purpose: updated.purpose ?? ''
     };
 
-    // Replace with server-canonical row
-    setLendRecords(prev => prev.map(l => (l.id === id ? mapped : l)));
+    // Update state with fresh canonical backend row
+    setLendRecords(prev =>
+      prev.map(l => (l.id === id ? mapped : l))
+    );
 
     return mapped;
   } catch (err) {
-    console.warn('updateLendRecord: API failed; kept optimistic local update', err);
-    // Return local item after optimistic update
-    return lendRecords.find(l => l.id === id) ?? null;
+    console.error('updateLendRecord failed', err);
+    return null;
   }
 };
 
 
 
 
-  const addEMI = (emi: Omit<EMI, 'id'>) => {
-    const newEMI = {
-      ...emi,
-      id: Date.now().toString(),
+    const addEMI = (emi: Omit<EMI, 'id'>) => {
+      const newEMI = {
+        ...emi,
+        id: Date.now().toString(),
+      };
+      setEMIs(prev => [...prev, newEMI]);
     };
-    setEMIs(prev => [...prev, newEMI]);
-  };
 
-  const addSubscription = (subscription: Omit<Subscription, 'id'>) => {
-    const newSubscription = {
-      ...subscription,
-      id: Date.now().toString(),
+const addSubscription = async (subscription: Omit<Subscription, 'id'>) => {
+  const temp: Subscription = { ...subscription, id: Date.now().toString() };
+  // optimistic add
+  setSubscriptions(prev => [...prev, temp]);
+
+  try {
+    // normalize booleans at caller level too
+    const frontPayload = {
+      name: subscription.name,
+      amount: subscription.amount,
+      frequency: subscription.frequency,
+      nextDueDate: subscription.nextDueDate ?? null,
+      category: subscription.category ?? null,
+      autoPayEnabled: Boolean(subscription.autoPayEnabled),
+      isActive: subscription.isActive !== undefined ? Boolean(subscription.isActive) : true,
     };
-    setSubscriptions(prev => [...prev, newSubscription]);
-  };
+
+    const created = await createSubscriptionAPI(frontPayload);
+
+    if (!created || !created.id) {
+      // if server returned nothing, revert optimistic item and throw
+      setSubscriptions(prev => prev.filter(s => s.id !== temp.id));
+      throw new Error('Server did not return created subscription');
+    }
+
+    // replace temp with server result
+    setSubscriptions(prev => prev.map(s => (s.id === temp.id ? created : s)));
+    return created;
+  } catch (err) {
+    console.warn('addSubscription: API failed; reverting optimistic add or keeping local copy', err);
+    // try to revert optimistic add if create failed
+    setSubscriptions(prev => prev.filter(s => s.id !== temp.id));
+    // optionally keep the optimistic item instead of reverting:
+    // setSubscriptions(prev => [...prev, temp]);
+    return null;
+  }
+};
+
 
   const addCategory = (category: Omit<Category, 'id'>) => {
     const newCategory = {
@@ -609,15 +692,46 @@ const updateLendRecord = async (id: string, updatedLendRecord: Partial<LendRecor
     setCategories(prev => prev.filter(cat => cat.id !== id));
   };
 
-  const updateSubscription = (id: string, updatedSubscription: Partial<Subscription>) => {
-    setSubscriptions(prev =>
-      prev.map(sub => (sub.id === id ? { ...sub, ...updatedSubscription } : sub))
-    );
+  const updateSubscription = async (id: string, updatedSubscription: Partial<Subscription>) => {
+    // optimistic local update
+    setSubscriptions(prev => prev.map(s => (s.id === id ? { ...s, ...updatedSubscription } : s)));
+
+    try {
+      // prepare payload in frontend shape; service will map to server keys
+      const payload: any = {};
+      if (updatedSubscription.name !== undefined) payload.name = updatedSubscription.name;
+      if (updatedSubscription.amount !== undefined) payload.amount = updatedSubscription.amount;
+      if (updatedSubscription.frequency !== undefined) payload.frequency = updatedSubscription.frequency;
+      if (updatedSubscription.nextDueDate !== undefined) payload.nextDueDate = updatedSubscription.nextDueDate;
+      if (updatedSubscription.category !== undefined) payload.category = updatedSubscription.category;
+      if (updatedSubscription.autoPayEnabled !== undefined) payload.autoPayEnabled = updatedSubscription.autoPayEnabled;
+      if (updatedSubscription.isActive !== undefined) payload.isActive = updatedSubscription.isActive;
+
+      const updated = await updateSubscriptionAPI(id, payload);
+      // replace with server-canonical mapped row
+      setSubscriptions(prev => prev.map(s => (s.id === id ? updated : s)));
+      return updated;
+    } catch (err) {
+      console.warn('updateSubscription: API failed; kept optimistic update', err);
+      // return local after optimistic update
+      return subscriptions.find(s => s.id === id) ?? null;
+    }
   };
 
-  const deleteSubscription = (id: string) => {
-    setSubscriptions(prev => prev.filter(sub => sub.id !== id));
-  };
+const deleteSubscription = async (id: string) => {
+  const prev = subscriptions;
+  // optimistic remove
+  setSubscriptions(prevList => prevList.filter(s => s.id !== id));
+  try {
+    await deleteSubscriptionAPI(id);
+    return true;
+  } catch (err) {
+    console.warn('deleteSubscription API failed; restoring local copy', err);
+    // restore previous state
+    setSubscriptions(prev);
+    return false;
+  }
+};
 
   const exportData = (): string => {
     const exportData = {
