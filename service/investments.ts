@@ -47,5 +47,10 @@ export async function updateInvestmentAPI(id: string, payload: UpdateInvestmentP
   return res.data;
 }
 
+export const normalizeDate = (date?: string): string => {
+  if (!date) return '';
+  const d = new Date(date);
+  return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0]; // YYYY-MM-DD
+};
 
 

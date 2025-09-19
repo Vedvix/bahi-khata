@@ -29,6 +29,14 @@ export async function updateLentAPI(id: string, payload: UpdateLentPayload) {
   return res.data;
 }
 
+export const payLentAPI = async (userId: number, payload: { paidAmount: number, paymentDate?: string }) => {
+  const res = await api.post(`/lent/${userId}/pay`, {
+    userId,
+    ...payload
+  });
+  return res.data;
+};
+
 // normalize frontend status to backend enum
 export const normalizeStatusForBackend = (s?: string | null): 'Active' | 'Paid' | 'Overdue' | undefined => {
   if (!s) return undefined;

@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 
 //api integration imports
 // add alongside your other imports
-import { fetchInvestmentsAPI, createInvestmentAPI, updateInvestmentAPI, } from '../../service/investments';
-import { fetchLentAPI, createLentAPI, updateLentAPI, normalizeStatusForBackend } from '../../service/lent';
+import { fetchInvestmentsAPI, createInvestmentAPI, updateInvestmentAPI, normalizeDate} from '../../service/investments';
+import { fetchLentAPI, createLentAPI, updateLentAPI,payLentAPI, normalizeStatusForBackend } from '../../service/lent';
 import { fetchSubscriptionsAPI, createSubscriptionAPI, updateSubscriptionAPI, deleteSubscriptionAPI } from '../../service/subscription'
 import { fetchTransactionsAPI, createTransactionAPI, updateTransactionAPI, deleteTransactionAPI, fetchRecentTransactionsAPI } from '../../service/transactions';
 
@@ -36,6 +36,7 @@ export interface LendRecord {
   borrowerName: string;
   amount: number;
   lendDate: string;
+  paymentDate:string;
   dueDate: string;
   interestRate: number;
   purpose: string;
@@ -261,6 +262,7 @@ const sampleLendRecords: LendRecord[] = [
     borrowerName: 'Rajesh Kumar',
     amount: 50000,
     lendDate: '2024-10-15',
+    paymentDate:'',
     dueDate: '2025-01-15',
     interestRate: 12.0,
     purpose: 'Business expansion',
@@ -274,6 +276,7 @@ const sampleLendRecords: LendRecord[] = [
     borrowerName: 'Priya Sharma',
     amount: 25000,
     lendDate: '2024-11-01',
+    paymentDate:'',
     dueDate: '2025-02-01',
     interestRate: 10.0,
     purpose: 'Medical emergency',
@@ -426,10 +429,6 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       console.warn("Failed to fetch transactions from API, using local data", err);
       setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
     }
-
-
-
-    
     };
 
     loadAll();
@@ -540,7 +539,12 @@ const addTransaction = async (transaction: Omit<Transaction, "id">) => {
 // Add investment -> POST /investments (optimistic local create, then reconcile with server)
   const addInvestment = async (investment: Omit<Investment, 'id'>) => {
     // optimistic local create so UI isn't blocked
-    const temp: Investment = { ...investment, id: Date.now().toString() };
+    // When adding investment
+    const temp: Investment = { 
+      ...investment, 
+      id: Date.now().toString(), 
+      purchaseDate: normalizeDate(investment.purchaseDate)
+    };
     setInvestments(prev => [...prev, temp]);
 
     try {
@@ -550,7 +554,7 @@ const addTransaction = async (transaction: Omit<Transaction, "id">) => {
         type: investment.type,
         amount: investment.amount,
         currentValue: investment.currentValue ?? 0,
-        startDate: investment.purchaseDate, 
+        startDate: investment.purchaseDate, // backend expects startDate
         maturityDate: investment.maturityDate ?? null,
         returns: investment.returns ?? 0,
       };
@@ -644,75 +648,167 @@ const addTransaction = async (transaction: Omit<Transaction, "id">) => {
   };
 
 
+//static change yearly interest based
+// const updateLendRecord = async (
+//   id: string,
+//   changes: Partial<LendRecord>
+// ): Promise<LendRecord | null> => {
+//   try {
+//     // Find existing record in state
+//     const existing = lendRecords.find(l => l.id === id);
+//     if (!existing) throw new Error('Local record not found');
 
-const updateLendRecord = async (
-  id: string,
-  changes: Partial<LendRecord>
-): Promise<LendRecord | null> => {
+//       if (existing.remainingAmount <= 0) {
+//       console.warn(`Record ${id} is fully paid. No update allowed.`);
+//       return existing; // or null if you want to signal "no update"
+//     }
+
+//     // Build backend payload (only send fields that actually changed)
+//     const payload: any = {};
+
+//     if (changes.borrowerName !== undefined)
+//       payload.borrowerName = changes.borrowerName;
+
+//     if (changes.amount !== undefined)
+//       payload.principalAmount = changes.amount;
+
+//     if (changes.interestRate !== undefined)
+//       payload.interestRate = changes.interestRate;
+
+//     if (changes.lendDate !== undefined)
+//       payload.lentDate = changes.lendDate;
+
+//     if (changes.dueDate !== undefined)
+//       payload.dueDate = changes.dueDate;
+
+//     if (changes.paidAmount !== undefined)
+//       payload.paidAmount = changes.paidAmount;
+
+//     // Normalize status → backend expects "Active" | "Paid" | "Overdue"
+//     if (changes.status !== undefined) {
+//       const normalized = normalizeStatusForBackend(changes.status);
+//       if (normalized) payload.status = normalized;
+//     }
+
+//     // Call backend
+//     const updated = await updateLentAPI(id, payload);
+
+//     // Map backend → frontend shape
+//     const mapped: LendRecord = {
+//       id: updated.id?.toString(),
+//       borrowerName: updated.borrowerName ?? '',
+//       amount: updated.principalAmount ?? 0,
+//       lendDate: updated.lentDate ?? null,
+//       dueDate: updated.dueDate ?? null,
+//       interestRate: updated.interestRate ?? 0,
+//       status: (updated.status ?? 'Active').toLowerCase(),
+//       paidAmount: updated.paidAmount ?? 0,
+//       remainingAmount: updated.remainingAmount ?? Math.max(
+//         (updated.totalAmount ?? 0) - (updated.paidAmount ?? 0),
+//         0
+//       ),
+//       totalAmount: updated.totalAmount ?? (updated.principalAmount ?? 0) + (updated.paidAmount ?? 0),
+//       purpose: updated.purpose ?? ''
+//     };
+
+//     // Update state with fresh canonical backend row
+//     setLendRecords(prev =>
+//       prev.map(l => (l.id === id ? mapped : l))
+//     );
+
+//     return mapped;
+//   } catch (err) {
+//     console.error('updateLendRecord failed', err);
+//     return null;
+//   }
+// };
+
+//prepayment based
+const updateLendRecord = async (id: string, changes: Partial<LendRecord>) => {
+  const existing = lendRecords.find(l => l.id === id);
+  if (!existing) throw new Error('Local record not found');
+
+  // If already fully paid, nothing to do
+  if (existing.remainingAmount <= 0) {
+    console.warn(`Record ${id} is fully paid. No update allowed.`);
+    return existing;
+  }
+
+  // compute delta (if caller passed a cumulative paidAmount)
+  const delta = changes.paidAmount !== undefined
+    ? Number(changes.paidAmount) - Number(existing.paidAmount || 0)
+    : 0;
+
+  // Optimistic local update:
+  const optimistic = {
+    ...existing,
+    // keep optimistic cumulative paidAmount (what the UI expects)
+    paidAmount: changes.paidAmount !== undefined ? changes.paidAmount : existing.paidAmount,
+    // IMPORTANT: optimistic remainingAmount should decrement principal remaining by delta,
+    // because your backend's payLent tracks remaining principal (not totalAmount - paid).
+    remainingAmount: changes.paidAmount !== undefined
+      ? Math.max((existing.remainingAmount || 0) - Math.max(delta, 0), 0)
+      : existing.remainingAmount,
+    paymentDate: changes.paymentDate ?? existing.paymentDate,
+    status: changes.paidAmount !== undefined
+      ? (changes.paidAmount >= (existing.totalAmount ?? existing.amount ?? 0) ? 'fully_paid' : 'partially_paid')
+      : existing.status,
+  };
+
+  setLendRecords(prev => prev.map(l => (l.id === id ? optimistic : l)));
+
   try {
-    // Find existing record in state
-    const existing = lendRecords.find(l => l.id === id);
-    if (!existing) throw new Error('Local record not found');
-
-    // Build backend payload (only send fields that actually changed)
+    // Build payload for backend: payLent expects the *single payment amount*, not cumulative.
     const payload: any = {};
-
-    if (changes.borrowerName !== undefined)
-      payload.borrowerName = changes.borrowerName;
-
-    if (changes.amount !== undefined)
-      payload.principalAmount = changes.amount;
-
-    if (changes.interestRate !== undefined)
-      payload.interestRate = changes.interestRate;
-
-    if (changes.lendDate !== undefined)
-      payload.lentDate = changes.lendDate;
-
-    if (changes.dueDate !== undefined)
-      payload.dueDate = changes.dueDate;
-
-    if (changes.paidAmount !== undefined)
-      payload.paidAmount = changes.paidAmount;
-
-    // Normalize status → backend expects "Active" | "Paid" | "Overdue"
-    if (changes.status !== undefined) {
-      const normalized = normalizeStatusForBackend(changes.status);
-      if (normalized) payload.status = normalized;
+    if (changes.paidAmount !== undefined) {
+      const sentDelta = Math.max(delta, 0); // don't send negative payments
+      if (sentDelta <= 0) {
+        // nothing to send — fallback to returning optimistic
+        return optimistic;
+      }
+      payload.paidAmount = sentDelta;
     }
+    if (changes.paymentDate !== undefined) payload.paymentDate = changes.paymentDate;
 
-    // Call backend
-    const updated = await updateLentAPI(id, payload);
+    const updated = await payLentAPI(id, payload);
+    if (!updated) return null;
 
-    // Map backend → frontend shape
+    // Map backend -> frontend. Trust the backend's returned values where possible.
     const mapped: LendRecord = {
-      id: updated.id?.toString(),
+      id: updated.id?.toString() ?? id,
       borrowerName: updated.borrowerName ?? '',
       amount: updated.principalAmount ?? 0,
-      lendDate: updated.lentDate ?? null,
-      dueDate: updated.dueDate ?? null,
+      lendDate: updated.lentDate ?? '',
+      paymentDate: updated.lastPaymentDate ?? '',
+      dueDate: updated.dueDate ?? '',
       interestRate: updated.interestRate ?? 0,
-      status: (updated.status ?? 'Active').toLowerCase(),
-      paidAmount: updated.paidAmount ?? 0,
-      remainingAmount: updated.remainingAmount ?? Math.max(
-        (updated.totalAmount ?? 0) - (updated.paidAmount ?? 0),
-        0
+      purpose: updated.purpose ?? '',
+      // backend status values: e.g. 'Active' / 'Paid' — normalize to frontend keys
+      status:
+        (updated.status || '').toString().toLowerCase() === 'paid' ? 'fully_paid'
+        : (updated.status || '').toString().toLowerCase() === 'active' ? 'active'
+        : 'partially_paid',
+      // use server-provided paidAmount and remainingAmount when available
+      paidAmount: Number(updated.paidAmount ?? 0),
+      totalAmount: Number(updated.totalAmount ?? (updated.principalAmount ?? 0)),
+      // prefer server's remainingAmount (backend's semantic = remaining principal).
+      remainingAmount: Number(
+        updated.remainingAmount !== undefined
+          ? updated.remainingAmount
+          : Math.max((updated.totalAmount ?? (updated.principalAmount ?? 0)) - (updated.paidAmount ?? 0), 0)
       ),
-      totalAmount: updated.totalAmount ?? (updated.principalAmount ?? 0) + (updated.paidAmount ?? 0),
-      purpose: updated.purpose ?? ''
     };
 
-    // Update state with fresh canonical backend row
-    setLendRecords(prev =>
-      prev.map(l => (l.id === id ? mapped : l))
-    );
-
+    setLendRecords(prev => prev.map(l => (l.id === id ? mapped : l)));
     return mapped;
   } catch (err) {
-    console.error('updateLendRecord failed', err);
-    return null;
+    console.error('updateLendRecord API failed', err);
+    return optimistic; // keep optimistic update on failure
   }
 };
+
+
+
 
 
 

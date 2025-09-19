@@ -115,7 +115,7 @@ export function InvestmentLending() {
   const totalInvestmentAmount = investments.reduce((sum, inv) => sum + inv.amount, 0);
   const totalInvestmentReturns = totalInvestmentValue - totalInvestmentAmount;
 
-  const totalLentAmount = lendRecords.reduce((sum, lend) => sum + lend.totalAmount, 0);
+  const totalLentAmount = lendRecords.reduce((sum, lend) => sum + lend.remainingAmount +lend.paidAmount, 0);
   const totalReceivedAmount = lendRecords.reduce((sum, lend) => sum + lend.paidAmount, 0);
   const totalPendingAmount = lendRecords.reduce((sum, lend) => sum + lend.remainingAmount, 0);
 
@@ -262,7 +262,9 @@ export function InvestmentLending() {
             {/* Lending List */}
             <div className="space-y-4">
               {lendRecords.map((lendRecord) => {
-                const repaymentProgress = (lendRecord.paidAmount / lendRecord.totalAmount) * 100;
+                const repaymentProgress =(totalReceivedAmount/totalLentAmount*100);
+                const remainingAmount = lendRecord.remainingAmount;
+
                 const isOverdue = new Date(lendRecord.dueDate) < new Date() && lendRecord.status === 'active';
                 
                 return (
@@ -286,7 +288,7 @@ export function InvestmentLending() {
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
                           <p className="text-sm text-gray-500">Lent Amount</p>
-                          <p className="text-lg text-gray-900">{formatCurrency(lendRecord.totalAmount)}</p>
+                          <p className="text-lg text-gray-900">{formatCurrency(totalLentAmount)}</p>
                         </div>
                         <div>
                           <p className="text-sm text-gray-500">Interest Rate</p>
