@@ -5,7 +5,7 @@ import { Badge } from './ui/badge';
 import { TrendingUp, TrendingDown, Calendar, AlertCircle } from 'lucide-react';
 
 export function Dashboard() {
-  const { transactions, investments, lendRecords, emis, subscriptions } = useTransactions();
+  const { transactions,recentTransactions, investments, lendRecords, emis, subscriptions ,totalIncome, balance, totalExpense} = useTransactions();
 
   // Calculate current balance
   const currentBalance = transactions.reduce((acc, transaction) => {
@@ -13,7 +13,7 @@ export function Dashboard() {
   }, 0);
 
   // Get recent transactions (last 5)
-  const recentTransactions = transactions.slice(0, 5);
+//  const recentTransactions = transactions.slice(0, 5);
 
   // Get upcoming due dates (next 7 days)
   const today = new Date();
@@ -64,7 +64,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-white/80 text-sm mb-1">Total Balance</p>
-              <p className="text-3xl text-white">{formatCurrency(currentBalance)}</p>
+              <p className="text-3xl text-white">{balance}</p>
             </div>
             <div className="text-right">
               <div className="flex items-center text-green-300 mb-1">
@@ -87,7 +87,7 @@ export function Dashboard() {
               </div>
               <div>
                 <p className="text-gray-500 text-sm">Income</p>
-                <p className="text-lg text-gray-900">₹52,000</p>
+                <p className="text-lg text-gray-900">₹{totalIncome}</p>
               </div>
             </div>
           </div>
@@ -99,7 +99,7 @@ export function Dashboard() {
               </div>
               <div>
                 <p className="text-gray-500 text-sm">Expenses</p>
-                <p className="text-lg text-gray-900">₹28,500</p>
+                <p className="text-lg text-gray-900">₹{totalExpense}</p>
               </div>
             </div>
           </div>

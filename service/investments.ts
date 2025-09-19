@@ -16,8 +16,26 @@ export type UpdateInvestmentPayload = Partial<CreateInvestmentPayload>;
 export async function fetchInvestmentsAPI(query?: { page?: number; size?: number }) {
   const q = query ? `?page=${query.page ?? 1}&size=${query.size ?? 20}` : '';
   const res = await api.get(`/investments${q}`);
-  return res.data; // backend returns { total, page, size, investments } per your controller
+
+  const { total, page, size, investments } = res.data;
+
+  // map backend → frontend
+  const mapped = investments.map((inv: any) => ({
+    id: inv.id.toString(),
+    name: inv.name,
+    type: inv.type,
+    amount: inv.amount,
+    currentValue: inv.currentValue,
+    purchaseDate: inv.startDate,              // ✅ map here
+    maturityDate: inv.maturityDate ?? undefined,
+    interestRate: inv.interestRate ?? undefined,
+    returns: inv.returns,
+    status: inv.status?.toLowerCase?.() ?? 'active',
+  }));
+
+  return { total, page, size, investments: mapped };
 }
+
 
 export async function createInvestmentAPI(payload: CreateInvestmentPayload) {
   const res = await api.post('/investments', payload);
@@ -28,4 +46,6 @@ export async function updateInvestmentAPI(id: string, payload: UpdateInvestmentP
   const res = await api.put(`/investments/${id}`, payload);
   return res.data;
 }
+
+
 

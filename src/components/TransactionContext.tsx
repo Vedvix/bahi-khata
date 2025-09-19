@@ -5,7 +5,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { fetchInvestmentsAPI, createInvestmentAPI, updateInvestmentAPI, } from '../../service/investments';
 import { fetchLentAPI, createLentAPI, updateLentAPI, normalizeStatusForBackend } from '../../service/lent';
 import { fetchSubscriptionsAPI, createSubscriptionAPI, updateSubscriptionAPI, deleteSubscriptionAPI } from '../../service/subscription'
-import { fetchTransactionsAPI, createTransactionAPI, updateTransactionAPI, deleteTransactionAPI } from '../../service/transactions';
+import { fetchTransactionsAPI, createTransactionAPI, updateTransactionAPI, deleteTransactionAPI, fetchRecentTransactionsAPI } from '../../service/transactions';
 
 
 export interface Transaction {
@@ -64,6 +64,7 @@ export interface Subscription {
   nextDueDate: string;
   category: string;
   autoPayEnabled: boolean;
+  isActive: string;
 }
 
 export interface Category {
@@ -76,11 +77,13 @@ export interface Category {
 
 interface TransactionContextType {
   transactions: Transaction[];
+  recentTransactions: Transaction[];
   investments: Investment[];
   lendRecords: LendRecord[];
   emis: EMI[];
   subscriptions: Subscription[];
   categories: Category[];
+
   addTransaction: (transaction: Omit<Transaction, 'id'>) => void;
   addInvestment: (investment: Omit<Investment, 'id'>) => void;
   addLendRecord: (lendRecord: Omit<LendRecord, 'id'>) => void;
@@ -93,9 +96,14 @@ interface TransactionContextType {
   addCategory: (category: Omit<Category, 'id'>) => void;
   updateCategory: (id: string, category: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
+
   exportData: () => string;
   importData: (data: string) => boolean;
   clearAllData: () => void;
+  
+  totalIncome: number;
+  totalExpense: number;
+  balance: number;
 }
 
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
@@ -187,7 +195,8 @@ const sampleSubscriptions: Subscription[] = [
     frequency: 'monthly',
     nextDueDate: '2024-12-30',
     category: 'Entertainment',
-    autoPayEnabled: true
+    autoPayEnabled: true,
+    isActive:""
   },
   {
     id: '2',
@@ -196,7 +205,8 @@ const sampleSubscriptions: Subscription[] = [
     frequency: 'monthly',
     nextDueDate: '2025-01-05',
     category: 'Utilities',
-    autoPayEnabled: false
+    autoPayEnabled: false,
+    isActive:""
   },
   {
     id: '3',
@@ -205,7 +215,8 @@ const sampleSubscriptions: Subscription[] = [
     frequency: 'monthly',
     nextDueDate: '2025-01-02',
     category: 'Utilities',
-    autoPayEnabled: true
+    autoPayEnabled: true,
+    isActive:""
   },
 ];
 
@@ -311,6 +322,12 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   const [emis, setEMIs] = useState<EMI[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [totalIncome, setTotalIncome] = useState(0);
+  const [totalExpense, setTotalExpense] = useState(0);
+  const [balance, setBalance] = useState(0);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+
+
 
   // Load data from localStorage on mount
   // useEffect investments added other left
@@ -327,9 +344,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
 
       if (!mounted) return;
       setTransactions(loadedTransactions);
-      setLendRecords(loadedLendRecords);
       setEMIs(loadedEMIs);
-      setSubscriptions(loadedSubscriptions);
       setCategories(loadedCategories);
 
       // Investments: try API, fallback to localStorage/sample
@@ -386,22 +401,35 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       }
           // Transactions: try API, fallback to localStorage/sample
       try {
-        const txResp = await fetchTransactionsAPI({ page: 1, size: 200 });
-        if (!mounted) return;
+      // Fetch transactions from backend
+      const txResp = await fetchTransactionsAPI();
+      if (!mounted) return;
 
-        // txResp may be { total, page, size, transactions: [...] } or an array
-        const txList = Array.isArray(txResp) ? txResp : (txResp.transactions ?? txResp);
-        if (txList && txList.length > 0) {
-          setTransactions(txList);
-        } else {
-          setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
-        }
-      } catch (err) {
-        console.warn("Failed to fetch transactions from API; using local data", err);
-        if (!mounted) return;
-        setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
-      }
+      // txResp may be array of transactions from backend
+            if (Array.isArray(txResp) && txResp.length > 0) {
+        setTransactions(txResp);
 
+        // compute totals from backend or local calculation
+        const income = txResp
+          .filter(tx => tx.type === 'income')
+          .reduce((sum, tx) => sum + tx.amount, 0);
+        const expense = txResp
+          .filter(tx => tx.type === 'expense')
+          .reduce((sum, tx) => sum + tx.amount, 0);
+
+        setTotalIncome(income);
+        setTotalExpense(expense);
+        setBalance(income - expense);
+      } 
+
+    } catch (err) {
+      console.warn("Failed to fetch transactions from API, using local data", err);
+      setTransactions(loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions));
+    }
+
+
+
+    
     };
 
     loadAll();
@@ -410,6 +438,33 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+  
+  if (!transactions) return;
+  
+  const income = transactions
+    .filter((tx) => tx.type === "income")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+
+  const expense = transactions
+    .filter((tx) => tx.type === "expense")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+
+  setTotalIncome(income);
+  setTotalExpense(expense);
+  setBalance(income - expense);
+}, [transactions]);   // 👈 runs whenever transactions changes
+
+useEffect(() => {
+  fetchRecentTransactionsAPI().then((resp) => {
+    const normalized: Transaction[] = resp.map((tx: any) => ({
+      ...tx,
+      id: String(tx.id),  // 👈 force id into string
+    }));
+    setRecentTransactions(normalized);
+  });
+}, [transactions]);
 
 
 
@@ -438,13 +493,48 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     saveToStorage(STORAGE_KEYS.CATEGORIES, categories);
   }, [categories]);
 
-  const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
-    const newTransaction = {
-      ...transaction,
-      id: Date.now().toString(),
-    };
-    setTransactions(prev => [newTransaction, ...prev]);
-  };
+//Helper to update income balance and expense
+  const recalcTotals = (txns: Transaction[]) => {
+  const income = txns
+    .filter((tx) => tx.type === "income")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  const expense = txns
+    .filter((tx) => tx.type === "expense")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  setTotalIncome(income);
+  setTotalExpense(expense);
+  setBalance(income - expense);
+};
+
+
+const addTransaction = async (transaction: Omit<Transaction, "id">) => {
+  const temp: Transaction = { ...transaction, id: Date.now().toString() };
+
+  // optimistic update
+  setTransactions((prev) => {
+    const updated = [temp, ...prev];
+    recalcTotals(updated);   // 🔥 recompute totals
+    return updated;
+  });
+
+  try {
+    const created = await createTransactionAPI(transaction);
+
+    // replace temp with created from backend
+    setTransactions((prev) => {
+      const updated = prev.map((tx) =>
+        tx.id === temp.id ? created : tx
+      );
+      recalcTotals(updated);   // 🔥 recompute totals
+      return updated;
+    });
+
+    return created;
+  } catch (err) {
+    console.warn("Transaction API failed, keeping local", err);
+    return temp;
+  }
+};
 
   //add investment(api integration)
 // Add investment -> POST /investments (optimistic local create, then reconcile with server)
@@ -460,7 +550,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         type: investment.type,
         amount: investment.amount,
         currentValue: investment.currentValue ?? 0,
-        startDate: investment.purchaseDate, // backend expects startDate
+        startDate: investment.purchaseDate, 
         maturityDate: investment.maturityDate ?? null,
         returns: investment.returns ?? 0,
       };
@@ -789,6 +879,7 @@ const deleteSubscription = async (id: string) => {
     <TransactionContext.Provider
       value={{
         transactions,
+        recentTransactions,
         investments,
         lendRecords,
         emis,
@@ -809,6 +900,9 @@ const deleteSubscription = async (id: string) => {
         exportData,
         importData,
         clearAllData,
+        totalIncome,
+        totalExpense,
+        balance,
       }}
     >
       {children}

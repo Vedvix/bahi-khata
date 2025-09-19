@@ -199,16 +199,16 @@ export function InvestmentLending() {
                         <p className="text-sm text-gray-500">Current Value</p>
                         <p className="text-lg text-gray-900">{formatCurrency(investment.currentValue)}</p>
                       </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Returns</p>
-                        <p className={`text-lg ${investment.returns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {investment.returns >= 0 ? '+' : ''}{investment.returns.toFixed(2)}%
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Purchase Date</p>
-                        <p className="text-lg text-gray-900">{formatDate(investment.purchaseDate)}</p>
-                      </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Returns</p>
+                          <p className={`text-lg ${investment.returns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {investment.returns >= 0 ? '+' : ''}{investment.returns.toFixed(2)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Purchase Date</p>
+                          <p className="text-lg text-gray-900">{formatDate(investment.purchaseDate)}</p>
+                        </div>
                     </div>
 
                     <Button

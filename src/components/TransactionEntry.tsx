@@ -75,7 +75,8 @@ export function TransactionEntry() {
         purpose,
         status: 'active',
         paidAmount: 0,
-        remainingAmount: parseFloat(amount)
+        remainingAmount: parseFloat(amount),
+        totalAmount:0,
       });
       
       toast.success('Lending record added successfully!');
