@@ -1,8 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
+import { initDB } from './services/sqlite';
+import { useAuth } from './AuthContext';
+import {  addSubscription as addSubscriptionDB,  
+          updateSubscription as updateSubscriptionDB, 
+          deleteSubscription as deleteSubscriptionDB } from './services/subscriptions';
+import { addInvestmentDB, updateInvestmentDB } from './services/investments';
+import { addTransactionDB } from './services/transactions';
+import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, calculateRemainingWithInterest } from './services/lendmoney';
+
+
+
 export interface Transaction {
   id: string;
-  type: 'income' | 'expense' | 'investment' | 'lend';
+  user_id: string;
+  type: 'income' | 'expense' | 'investment' | 'lend' | 'subscription';
   amount: number;
   category: string;
   description: string;
@@ -12,6 +24,7 @@ export interface Transaction {
 
 export interface Investment {
   id: string;
+  user_id: string;
   name: string;
   type: 'mutual_fund' | 'stocks' | 'ppf' | 'fd' | 'gold' | 'crypto' | 'bonds';
   amount: number;
@@ -25,6 +38,7 @@ export interface Investment {
 
 export interface LendRecord {
   id: string;
+  user_id: string;
   borrowerName: string;
   amount: number;
   lendDate: string;
@@ -49,6 +63,7 @@ export interface EMI {
 
 export interface Subscription {
   id: string;
+  user_id: string;
   name: string;
   amount: number;
   frequency: 'monthly' | 'quarterly' | 'yearly';
@@ -120,6 +135,7 @@ const defaultCategories: Category[] = [
 const sampleTransactions: Transaction[] = [
   {
     id: '1',
+    user_id: '1',
     type: 'expense',
     amount: 1200,
     category: 'Groceries',
@@ -129,6 +145,7 @@ const sampleTransactions: Transaction[] = [
   },
   {
     id: '2',
+    user_id: '1',
     type: 'income',
     amount: 50000,
     category: 'Salary',
@@ -138,6 +155,7 @@ const sampleTransactions: Transaction[] = [
   },
   {
     id: '3',
+    user_id: '1',
     type: 'expense',
     amount: 800,
     category: 'Petrol/Fuel',
@@ -173,6 +191,7 @@ const sampleEMIs: EMI[] = [
 const sampleSubscriptions: Subscription[] = [
   {
     id: '1',
+    user_id: '1',
     name: 'Netflix',
     amount: 649,
     frequency: 'monthly',
@@ -182,6 +201,7 @@ const sampleSubscriptions: Subscription[] = [
   },
   {
     id: '2',
+    user_id: '2',
     name: 'Electricity Bill',
     amount: 2500,
     frequency: 'monthly',
@@ -191,6 +211,7 @@ const sampleSubscriptions: Subscription[] = [
   },
   {
     id: '3',
+    user_id: '3',
     name: 'Mobile Recharge',
     amount: 399,
     frequency: 'monthly',
@@ -203,6 +224,7 @@ const sampleSubscriptions: Subscription[] = [
 const sampleInvestments: Investment[] = [
   {
     id: '1',
+    user_id: '1',
     name: 'SBI Bluechip Fund',
     type: 'mutual_fund',
     amount: 50000,
@@ -213,6 +235,7 @@ const sampleInvestments: Investment[] = [
   },
   {
     id: '2',
+    user_id: '1',
     name: 'Reliance Industries',
     type: 'stocks',
     amount: 25000,
@@ -223,6 +246,7 @@ const sampleInvestments: Investment[] = [
   },
   {
     id: '3',
+    user_id: '1',
     name: 'PPF Account',
     type: 'ppf',
     amount: 150000,
@@ -238,6 +262,7 @@ const sampleInvestments: Investment[] = [
 const sampleLendRecords: LendRecord[] = [
   {
     id: '1',
+    user_id: '1',
     borrowerName: 'Rajesh Kumar',
     amount: 50000,
     lendDate: '2024-10-15',
@@ -250,6 +275,7 @@ const sampleLendRecords: LendRecord[] = [
   },
   {
     id: '2',
+    user_id: '1',
     borrowerName: 'Priya Sharma',
     amount: 25000,
     lendDate: '2024-11-01',
@@ -263,15 +289,15 @@ const sampleLendRecords: LendRecord[] = [
 ];
 
 // Local storage keys
-const STORAGE_KEYS = {
-  TRANSACTIONS: 'fintrack_transactions',
-  INVESTMENTS: 'fintrack_investments', 
-  LEND_RECORDS: 'fintrack_lend_records',
-  EMIS: 'fintrack_emis',
-  SUBSCRIPTIONS: 'fintrack_subscriptions',
-  CATEGORIES: 'fintrack_categories',
-  LAST_BACKUP: 'fintrack_last_backup'
-};
+const STORAGE_KEYS = (userId: string) => ({
+  TRANSACTIONS: `fintrack_transactions_${userId}`,
+  INVESTMENTS: `fintrack_investments_${userId}`,
+  LEND_RECORDS: `fintrack_lend_records_${userId}`,
+  EMIS: `fintrack_emis_${userId}`,
+  SUBSCRIPTIONS: `fintrack_subscriptions_${userId}`,
+  CATEGORIES: `fintrack_categories_${userId}`,
+});
+
 
 // Helper functions for localStorage
 const loadFromStorage = (key: string, defaultValue: any): any => {
@@ -294,6 +320,7 @@ const saveToStorage = (key: string, data: any): void => {
 };
 
 export function TransactionProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [lendRecords, setLendRecords] = useState<LendRecord[]>([]);
@@ -302,82 +329,215 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
 
   // Load data from localStorage on mount
-  useEffect(() => {
-    const loadedTransactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, sampleTransactions);
-    const loadedInvestments = loadFromStorage(STORAGE_KEYS.INVESTMENTS, sampleInvestments);
-    const loadedLendRecords = loadFromStorage(STORAGE_KEYS.LEND_RECORDS, sampleLendRecords);
-    const loadedEMIs = loadFromStorage(STORAGE_KEYS.EMIS, sampleEMIs);
-    const loadedSubscriptions = loadFromStorage(STORAGE_KEYS.SUBSCRIPTIONS, sampleSubscriptions);
-    const loadedCategories = loadFromStorage(STORAGE_KEYS.CATEGORIES, defaultCategories);
 
-    setTransactions(loadedTransactions);
-    setInvestments(loadedInvestments);
-    setLendRecords(loadedLendRecords);
-    setEMIs(loadedEMIs);
-    setSubscriptions(loadedSubscriptions);
-    setCategories(loadedCategories);
-  }, []);
+  useEffect(() => {
+  if (!user?.id) return; // wait until user is available
+
+  const keys = STORAGE_KEYS(user.id);
+
+  const loadedTransactions = loadFromStorage(keys.TRANSACTIONS, []);
+  const loadedInvestments = loadFromStorage(keys.INVESTMENTS, []);
+  const loadedLendRecords = loadFromStorage(keys.LEND_RECORDS, []);
+  const loadedEMIs = loadFromStorage(keys.EMIS, []);
+  const loadedSubscriptions = loadFromStorage(keys.SUBSCRIPTIONS, []);
+  const loadedCategories = loadFromStorage(keys.CATEGORIES, defaultCategories);
+
+  setTransactions(loadedTransactions);
+  setInvestments(loadedInvestments);
+  setLendRecords(loadedLendRecords);
+  setEMIs(loadedEMIs);
+  setSubscriptions(loadedSubscriptions);
+  setCategories(loadedCategories);
+}, [user?.id]); // re-run whenever user changes
+
+  useEffect(() => {
+  initDB().then(() => console.log('DB initialized'));
+}, []);
 
   // Save to localStorage whenever data changes
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.TRANSACTIONS, transactions);
-  }, [transactions]);
+// Save transactions per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.TRANSACTIONS, transactions);
+}, [transactions, user?.id]);
 
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.INVESTMENTS, investments);
-  }, [investments]);
+// Save investments per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.INVESTMENTS, investments);
+}, [investments, user?.id]);
 
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.LEND_RECORDS, lendRecords);
-  }, [lendRecords]);
+// Save lend records per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.LEND_RECORDS, lendRecords);
+}, [lendRecords, user?.id]);
 
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.EMIS, emis);
-  }, [emis]);
+// Save EMIs per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.EMIS, emis);
+}, [emis, user?.id]);
 
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SUBSCRIPTIONS, subscriptions);
-  }, [subscriptions]);
+// Save subscriptions per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.SUBSCRIPTIONS, subscriptions);
+}, [subscriptions, user?.id]);
 
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CATEGORIES, categories);
-  }, [categories]);
+// Save categories per user
+useEffect(() => {
+  if (!user?.id) return;
+  const keys = STORAGE_KEYS(user.id);
+  saveToStorage(keys.CATEGORIES, categories);
+}, [categories, user?.id]);
 
-  const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
-    const newTransaction = {
-      ...transaction,
-      id: Date.now().toString(),
-    };
-    setTransactions(prev => [newTransaction, ...prev]);
+
+  const addTransaction = async (transaction: Omit<Transaction, 'id' | 'user_id'>) => {
+  if (!user?.id) {
+    console.error("No logged in user, cannot add transaction.");
+    return;
+  }
+
+  const newTransaction: Transaction = {
+    ...transaction,
+    id: Date.now().toString(),
+    user_id: user.id,
   };
 
-  const addInvestment = (investment: Omit<Investment, 'id'>) => {
-    const newInvestment = {
-      ...investment,
-      id: Date.now().toString(),
-    };
-    setInvestments(prev => [...prev, newInvestment]);
+  try {
+    await addTransactionDB(newTransaction); // Save to SQLite
+    setTransactions(prev => [newTransaction, ...prev]); // Update React state
+    console.log("✅ Transaction added:", newTransaction);
+  } catch (err) {
+    console.error("❌ Failed to add transaction to DB:", err);
+  }
+};
+
+const addInvestment = async (investment: Omit<Investment, 'id' | 'user_id'>) => {
+  if (!user?.id) {
+    console.error("No logged in user found, cannot add investment.");
+    return;
+  }
+
+  const newInvestment: Investment = {
+    ...investment,
+    id: Date.now().toString(),
+    user_id: user.id,
   };
 
-  const addLendRecord = (lendRecord: Omit<LendRecord, 'id'>) => {
-    const newLendRecord = {
-      ...lendRecord,
-      id: Date.now().toString(),
-    };
-    setLendRecords(prev => [...prev, newLendRecord]);
+  try {
+    await addInvestmentDB(newInvestment); // save to SQLite
+    setInvestments(prev => [...prev, newInvestment]); // update React state
+    console.log("✅ Investment added:", newInvestment);
+  } catch (err) {
+    console.error("❌ Failed to add investment to DB:", err);
+  }
+};
+
+const addLendRecord = (
+  lendRecord: Omit<LendRecord, 'id' | 'user_id' | 'status' | 'paidAmount' | 'remainingAmount'>,
+  user_id: string
+) => {
+  const newLendRecord: LendRecord = {
+    ...lendRecord,
+    id: Date.now().toString(),
+    user_id:user.id,
+    paidAmount: 0,
+    remainingAmount: calculateRemainingWithInterest({ ...lendRecord, paidAmount: 0 }),
+    status: 'active',
   };
 
-  const updateInvestment = (id: string, updatedInvestment: Partial<Investment>) => {
-    setInvestments(prev =>
-      prev.map(inv => (inv.id === id ? { ...inv, ...updatedInvestment } : inv))
-    );
-  };
+  setLendRecords(prev => [...prev, newLendRecord]);
 
-  const updateLendRecord = (id: string, updatedLendRecord: Partial<LendRecord>) => {
-    setLendRecords(prev =>
-      prev.map(lend => (lend.id === id ? { ...lend, ...updatedLendRecord } : lend))
-    );
-  };
+  // Persist to DB
+  addLendRecordDB(newLendRecord).catch(err => console.error('Failed to add lend record to DB:', err));
+
+  console.log('✅ Lend record added:', newLendRecord);
+};
+
+
+const updateInvestment = async (id: string, updatedInvestment: Partial<Investment>) => {
+  // Update React state immediately
+  setInvestments(prev =>
+    prev.map(inv => (inv.id === id ? { ...inv, ...updatedInvestment } : inv))
+  );
+
+  try {
+    // Update in SQLite DB
+    await updateInvestmentDB(Number(id), updatedInvestment);
+    console.log("✅ Investment updated in DB:", id, updatedInvestment);
+  } catch (err) {
+    console.error("❌ Failed to update investment in DB:", id, err);
+  }
+};
+
+
+// TransactionContext.tsx (or wherever you have lendRecords state)
+const calculateRemainingWithInterest = (lend: LendRecord, prepayment: number = 0) => {
+  const principalRemaining = lend.amount - lend.paidAmount - prepayment;
+
+  const today = new Date();
+  const lendDate = new Date(lend.lendDate);
+
+  const monthsPassed = (today.getFullYear() - lendDate.getFullYear()) * 12
+                     + (today.getMonth() - lendDate.getMonth());
+
+  // Simple interest: Interest = P * R * T / 100
+  const interest = principalRemaining * (lend.interestRate / 100) * (monthsPassed / 12);
+
+  return Math.max(0, principalRemaining + interest);
+};
+
+const updateLendRecord = async (
+  id: string,
+  updates: Partial<LendRecord> & { prepaymentAmount?: number }
+) => {
+  setLendRecords(prev =>
+    prev.map(lend => {
+      if (lend.id !== id) return lend;
+
+      let newPaidAmount = lend.paidAmount;
+      let newRemainingAmount = lend.remainingAmount;
+      let newStatus = lend.status;
+
+      // Handle prepayment
+      if (updates.prepaymentAmount && updates.prepaymentAmount > 0) {
+        newPaidAmount += updates.prepaymentAmount;
+        newRemainingAmount = calculateRemainingWithInterest(lend, updates.prepaymentAmount);
+
+        if (newRemainingAmount <= 0) newStatus = 'fully_paid';
+        else newStatus = 'partially_paid';
+      }
+
+      // Prepare the object to update in DB (exclude prepaymentAmount)
+      const { prepaymentAmount, ...dbUpdate } = updates;
+
+      const finalUpdate = {
+        ...dbUpdate,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        status: newStatus,
+      };
+      console.log("add");
+      // Update DB without prepaymentAmount
+      updateLendRecordDB(Number(id), finalUpdate).catch(err =>
+        console.error('Failed to update DB:', err)
+      );
+
+      // Update state
+      return { ...lend, ...finalUpdate };
+    })
+  );
+};
+
+
+
 
   const addEMI = (emi: Omit<EMI, 'id'>) => {
     const newEMI = {
@@ -387,13 +547,32 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     setEMIs(prev => [...prev, newEMI]);
   };
 
-  const addSubscription = (subscription: Omit<Subscription, 'id'>) => {
-    const newSubscription = {
+
+
+  const addSubscription = async (
+    subscription: Omit<Subscription, 'id' | 'user_id'>
+  ) => {
+    if (!user?.id) {
+      console.error("No logged in user found, cannot add subscription.");
+      return;
+    }
+    console.log("Adding subscription for user:", user.id);
+    const newSubscription: Subscription = {
       ...subscription,
       id: Date.now().toString(),
+      user_id: user.id,
     };
-    setSubscriptions(prev => [...prev, newSubscription]);
+
+    try {
+      await addSubscriptionDB(newSubscription);
+      console.log("✅ Subscription added to DB:", newSubscription);
+      
+      setSubscriptions(prev => [...prev, newSubscription]);
+    } catch (err) {
+      console.error('Failed to add subscription to DB:', err);
+    }
   };
+
 
   const addCategory = (category: Omit<Category, 'id'>) => {
     const newCategory = {
@@ -413,14 +592,26 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     setCategories(prev => prev.filter(cat => cat.id !== id));
   };
 
-  const updateSubscription = (id: string, updatedSubscription: Partial<Subscription>) => {
+  const updateSubscription = async (id: string, updates: Partial<Subscription>) => {
     setSubscriptions(prev =>
-      prev.map(sub => (sub.id === id ? { ...sub, ...updatedSubscription } : sub))
+      prev.map(sub => (sub.id === id ? { ...sub, ...updates } : sub))
     );
+
+    try {
+      await updateSubscriptionDB(Number(id), updates); // update SQLite
+    } catch (err) {
+      console.error('Failed to update subscription in DB:', err);
+    }
   };
 
-  const deleteSubscription = (id: string) => {
+  const deleteSubscription = async (id: string) => {
     setSubscriptions(prev => prev.filter(sub => sub.id !== id));
+
+    try {
+      await deleteSubscriptionDB(Number(id)); // delete from SQLite
+    } catch (err) {
+      console.error('Failed to delete subscription from DB:', err);
+    }
   };
 
   const exportData = (): string => {

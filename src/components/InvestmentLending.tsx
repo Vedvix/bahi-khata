@@ -82,40 +82,58 @@ export function InvestmentLending() {
     setSelectedInvestment(null);
   };
 
+  // const handleRecordPayment = () => {
+  //   if (!selectedLendRecord || !paymentAmount) {
+  //     toast.error('Please enter a valid payment amount');
+  //     return;
+  //   }
+
+  //   const payment = parseFloat(paymentAmount);
+  //   const newPaidAmount = selectedLendRecord.paidAmount + payment;
+  //   const newRemainingAmount = selectedLendRecord.remainingAmount - payment;
+
+  //   let newStatus = selectedLendRecord.status;
+  //   if (newRemainingAmount <= 0) {
+  //     newStatus = 'fully_paid';
+  //   } else if (newPaidAmount > 0) {
+  //     newStatus = 'partially_paid';
+  //   }
+
+  //   updateLendRecord(selectedLendRecord.id, {
+  //     paidAmount: newPaidAmount,
+  //     remainingAmount: Math.max(0, newRemainingAmount),
+  //     status: newStatus
+  //   });
+
+  //   toast.success('Payment recorded successfully!');
+  //   setIsPaymentDialogOpen(false);
+  //   setPaymentAmount('');
+  //   setSelectedLendRecord(null);
+  // };
   const handleRecordPayment = () => {
-    if (!selectedLendRecord || !paymentAmount) {
-      toast.error('Please enter a valid payment amount');
-      return;
-    }
+  if (!selectedLendRecord || !paymentAmount) {
+    toast.error('Please enter a valid payment amount');
+    return;
+  }
 
-    const payment = parseFloat(paymentAmount);
-    const newPaidAmount = selectedLendRecord.paidAmount + payment;
-    const newRemainingAmount = selectedLendRecord.remainingAmount - payment;
+  const payment = parseFloat(paymentAmount);
 
-    let newStatus = selectedLendRecord.status;
-    if (newRemainingAmount <= 0) {
-      newStatus = 'fully_paid';
-    } else if (newPaidAmount > 0) {
-      newStatus = 'partially_paid';
-    }
+  updateLendRecord(selectedLendRecord.id, {
+    prepaymentAmount: payment
+  });
 
-    updateLendRecord(selectedLendRecord.id, {
-      paidAmount: newPaidAmount,
-      remainingAmount: Math.max(0, newRemainingAmount),
-      status: newStatus
-    });
+  toast.success('Payment recorded successfully!');
+  setIsPaymentDialogOpen(false);
+  setPaymentAmount('');
+  setSelectedLendRecord(null);
+};
 
-    toast.success('Payment recorded successfully!');
-    setIsPaymentDialogOpen(false);
-    setPaymentAmount('');
-    setSelectedLendRecord(null);
-  };
 
   const totalInvestmentValue = investments.reduce((sum, inv) => sum + inv.currentValue, 0);
   const totalInvestmentAmount = investments.reduce((sum, inv) => sum + inv.amount, 0);
   const totalInvestmentReturns = totalInvestmentValue - totalInvestmentAmount;
 
-  const totalLentAmount = lendRecords.reduce((sum, lend) => sum + lend.amount, 0);
+  const totalLentAmount = lendRecords.reduce((sum, lend) => sum + lend.paidAmount + lend.remainingAmount,0);
   const totalReceivedAmount = lendRecords.reduce((sum, lend) => sum + lend.paidAmount, 0);
   const totalPendingAmount = lendRecords.reduce((sum, lend) => sum + lend.remainingAmount, 0);
 
@@ -262,7 +280,7 @@ export function InvestmentLending() {
             {/* Lending List */}
             <div className="space-y-4">
               {lendRecords.map((lendRecord) => {
-                const repaymentProgress = (lendRecord.paidAmount / lendRecord.amount) * 100;
+                const repaymentProgress = Math.min((lendRecord.paidAmount / lendRecord.amount) * 100,100);
                 const isOverdue = new Date(lendRecord.dueDate) < new Date() && lendRecord.status === 'active';
                 
                 return (
@@ -286,7 +304,7 @@ export function InvestmentLending() {
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
                           <p className="text-sm text-gray-500">Lent Amount</p>
-                          <p className="text-lg text-gray-900">{formatCurrency(lendRecord.amount)}</p>
+                          <p className="text-lg text-gray-900">{formatCurrency(lendRecord.amount+(lendRecord.interestRate*lendRecord.amount/100))}</p>
                         </div>
                         <div>
                           <p className="text-sm text-gray-500">Interest Rate</p>

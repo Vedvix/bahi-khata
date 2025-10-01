@@ -13,6 +13,9 @@ import { toast } from 'sonner@2.0.3';
 import { useTransactions } from './TransactionContext';
 import { BackupService } from './BackupService';
 
+import { changePassword, updateUserInfo, logout } from '../auth/auth-direct';
+import { useAuth } from './AuthContext';
+
 interface UserData {
   name: string;
   email: string;
@@ -24,6 +27,7 @@ interface UserData {
 }
 
 export function UserProfile() {
+  const {logoutFn } = useAuth();
   const { exportData, importData, clearAllData } = useTransactions();
   const [userData, setUserData] = useState<UserData>({
     name: 'Rajesh Kumar',
@@ -48,26 +52,49 @@ export function UserProfile() {
   });
   const [isBackupInProgress, setIsBackupInProgress] = useState(false);
 
-  const handlePasswordChange = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    
-    if (passwordForm.newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters long');
-      return;
-    }
+const handlePasswordChange = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    // Simulate password change
-    setTimeout(() => {
-      toast.success('Password updated successfully');
-      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setIsPasswordDialogOpen(false);
-    }, 1000);
-  };
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    toast.error('New passwords do not match');
+    return;
+  }
+
+  if (passwordForm.newPassword.length < 8) {
+    toast.error('Password must be at least 8 characters long');
+    return;
+  }
+
+  try {
+    // You need user ID, assume it's stored in localStorage
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const res = await changePassword(user.id, passwordForm.currentPassword, passwordForm.newPassword);
+
+    toast.success(res.message || 'Password updated successfully');
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setIsPasswordDialogOpen(false);
+  } catch (err: any) {
+    toast.error(err.error || err.message || 'Failed to change password');
+    console.error('Change password error:', err);
+  }
+};
+
+const handleUpdateInfo = async () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const res = await updateUserInfo(user.id, {
+      name: userData.name,
+      email: userData.email,
+      phone: userData.phone
+    });
+    setUserData(prev => ({ ...prev, ...res.user }));
+    localStorage.setItem('me', JSON.stringify(res.user));
+    toast.success(res.message || 'User info updated successfully');
+  } catch (err: any) {
+    toast.error(err.error || err.message || 'Failed to update user info');
+    console.error('Update info error:', err);
+  }
+};
 
   const handleBackupToCloud = async () => {
     setIsBackupInProgress(true);
@@ -205,9 +232,14 @@ export function UserProfile() {
               />
             </div>
           </div>
-          <Button size="sm" className="w-full">
+          <Button
+            size="sm"
+            className="w-full"
+            onClick={handleUpdateInfo}
+          >
             Update Information
           </Button>
+
         </CardContent>
       </Card>
 
@@ -377,7 +409,7 @@ export function UserProfile() {
             </div>
             <Switch
               checked={userData.autoBackup}
-              onCheckedChange={(checked) => setUserData(prev => ({...prev, autoBackup: checked}))}
+              onCheckedChange={(checked: any) => setUserData(prev => ({...prev, autoBackup: checked}))}
             />
           </div>
 
@@ -470,6 +502,30 @@ export function UserProfile() {
             <p className="text-xs text-muted-foreground text-center">
               This will remove all data from your device. Make sure you have a backup.
             </p>
+          </div>
+
+          <Separator />
+
+    {/* Logout Button */}
+          <div className="space-y-2">
+            <Button
+  variant="outline"
+  className="w-full text-red-700 border-red-300 hover:bg-red-50"
+  onClick={() => {
+    if (window.confirm("Are you sure you want to logout?")) {
+      try {
+        logoutFn(); // clears user & tokens
+        toast.success("Logged out successfully");
+        // no need to navigate; AuthGate will automatically render AuthPage
+      } catch (err) {
+        console.error("Logout failed", err);
+        toast.error("Failed to logout. Try again.");
+      }
+    }
+  }}
+>
+  Logout
+</Button>
           </div>
         </CardContent>
       </Card>
