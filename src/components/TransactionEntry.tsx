@@ -9,8 +9,11 @@ import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { Plus, Minus, Check, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { useAuth } from './AuthContext';
+
 
 export function TransactionEntry() {
+  const { user } = useAuth();
   const { categories, addTransaction, addInvestment, addLendRecord } = useTransactions();
   const [transactionType, setTransactionType] = useState<'income' | 'expense' | 'investment' | 'lend'>('expense');
   const [amount, setAmount] = useState('');
@@ -18,6 +21,7 @@ export function TransactionEntry() {
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
+  const { addCategory } = useTransactions();
   
   // Investment-specific fields
   const [investmentType, setInvestmentType] = useState<'mutual_fund' | 'stocks' | 'ppf' | 'fd' | 'gold' | 'crypto' | 'bonds'>('mutual_fund');
@@ -28,6 +32,13 @@ export function TransactionEntry() {
   const [borrowerName, setBorrowerName] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [purpose, setPurpose] = useState('');
+
+  //Adding new Categories
+const [showAddCategory, setShowAddCategory] = useState(false);
+const [newCategoryName, setNewCategoryName] = useState('');
+const [newCategoryIcon, setNewCategoryIcon] = useState('✨');
+const [newCategoryColor, setNewCategoryColor] = useState('#3B82F6');
+
 
   const filteredCategories = categories.filter(cat => cat.type === transactionType);
 
@@ -48,6 +59,7 @@ export function TransactionEntry() {
       }
       
       addInvestment({
+        user_id:user.id,
         name: description,
         type: investmentType,
         amount: parseFloat(amount),
@@ -67,6 +79,7 @@ export function TransactionEntry() {
       }
       
       addLendRecord({
+        user_id:user.id,
         borrowerName,
         amount: parseFloat(amount),
         lendDate: date,
@@ -82,6 +95,7 @@ export function TransactionEntry() {
     } else {
       // Regular income/expense transaction
       addTransaction({
+        user_id:user.id,
         type: transactionType as 'income' | 'expense',
         amount: parseFloat(amount),
         category: categoryName,
@@ -226,6 +240,15 @@ export function TransactionEntry() {
                     </div>
                   </button>
                 ))}
+                {/* Add New Category Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowAddCategory(true)}
+                  className="p-4 rounded-2xl border-2 border-dashed border-gray-300 hover:border-indigo-500 bg-gray-50 flex flex-col items-center justify-center"
+                >
+                  <Plus size={20} className="text-indigo-500" />
+                  <div className="text-xs text-gray-600 font-medium mt-1">Add</div>
+                </button>
               </div>
             </div>
 
@@ -391,6 +414,70 @@ export function TransactionEntry() {
           </form>
         </div>
       </div>
+      {showAddCategory && (
+              <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                <div className="bg-white rounded-2xl shadow-lg w-96 p-6">
+                  <h2 className="text-lg font-semibold mb-4">Add New Category</h2>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Category Name</Label>
+                      <Input 
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="e.g., Gym, Shopping"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Icon (emoji)</Label>
+                      <Input 
+                        value={newCategoryIcon}
+                        onChange={(e) => setNewCategoryIcon(e.target.value)}
+                        placeholder="e.g., 🏋️"
+                      />
+                    </div>
+
+                    <div>
+                      <Label>Color</Label>
+                      <Input 
+                        type="color"
+                        value={newCategoryColor}
+                        onChange={(e) => setNewCategoryColor(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 mt-6">
+                    <Button variant="outline" onClick={() => setShowAddCategory(false)}>Cancel</Button>
+                    <Button 
+                      onClick={() => {
+                        if (!newCategoryName) {
+                          toast.error('Please enter a category name');
+                          return;
+                        }
+                        const newCat = {
+                          id: Date.now().toString(),
+                          name: newCategoryName,
+                          icon: newCategoryIcon,
+                          color: newCategoryColor,
+                          type: transactionType // 🔑 attach current type (income/expense/investment/lend)
+                        };
+                        // call context addCategory
+                        addCategory(newCat);
+                        toast.success('Category added!');
+                        setNewCategoryName('');
+                        setNewCategoryIcon('✨');
+                        setNewCategoryColor('#3B82F6');
+                        setShowAddCategory(false);
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
     </div>
   );
 }

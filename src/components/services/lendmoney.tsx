@@ -160,4 +160,3 @@ export const calculateRemainingWithInterest = (
 
   return remainingPrincipal + totalInterest;
 };
-

@@ -16,6 +16,7 @@ export async function initDB() {
 
     CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       icon TEXT,
       color TEXT,
@@ -64,9 +65,18 @@ export async function initDB() {
       FOREIGN KEY(user_id) REFERENCES local_users(id)
     );
 
+      CREATE TABLE IF NOT EXISTS lend_prepayments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lend_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      date TEXT NOT NULL,
+      FOREIGN KEY(lend_id) REFERENCES lend_records(id) ON DELETE CASCADE
+    );
+
+
     CREATE TABLE IF NOT EXISTS emis (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
+      user_id TEXT,
       name TEXT NOT NULL,
       totalAmount REAL NOT NULL,
       monthlyEMI REAL NOT NULL,

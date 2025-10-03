@@ -22,7 +22,7 @@ const totalIncome = transactions
 
 // Calculate total expenses
 const totalExpense = transactions
-  .filter(tx => tx.type === 'expense' || tx.type === 'subscription')
+  .filter(tx => tx.type === 'expense' || tx.type === 'subscription' || tx.type === 'lend' || tx.type === 'investment')
   .reduce((sum, tx) => sum + tx.amount, 0);
 
   // Get recent transactions (last 5)

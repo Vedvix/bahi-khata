@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
+import { db } from './services/sqlite';
 import { initDB } from './services/sqlite';
 import { useAuth } from './AuthContext';
 import {  addSubscription as addSubscriptionDB,  
@@ -7,8 +8,10 @@ import {  addSubscription as addSubscriptionDB,
           deleteSubscription as deleteSubscriptionDB } from './services/subscriptions';
 import { addInvestmentDB, updateInvestmentDB } from './services/investments';
 import { addTransactionDB } from './services/transactions';
-import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, calculateRemainingWithInterest } from './services/lendmoney';
-
+import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, 
+        calculateRemainingWithInterest } from './services/lendmoney';
+import { addCategoryDB, getCategoriesDB, updateCategoryDB, deleteCategoryDB } from './services/categories';
+import { addPrepaymentDB, getPrepaymentsDB } from './services/prepayment';
 
 
 export interface Transaction {
@@ -328,6 +331,9 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
+    useEffect(() => {
+  initDB().then(() => console.log('DB initialized'));
+}, []);
   // Load data from localStorage on mount
 
   useEffect(() => {
@@ -350,9 +356,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   setCategories(loadedCategories);
 }, [user?.id]); // re-run whenever user changes
 
-  useEffect(() => {
-  initDB().then(() => console.log('DB initialized'));
-}, []);
+
 
   // Save to localStorage whenever data changes
 // Save transactions per user
@@ -393,12 +397,44 @@ useEffect(() => {
 // Save categories per user
 useEffect(() => {
   if (!user?.id) return;
-  const keys = STORAGE_KEYS(user.id);
-  saveToStorage(keys.CATEGORIES, categories);
-}, [categories, user?.id]);
+
+  const loadCategories = async () => {
+    // 1️⃣ Fetch categories from DB for this user
+    let dbCategories: Category[] = await getCategoriesDB(user.id);
+
+    // 2️⃣ Identify default categories that are missing in DB
+    const missingDefaults = defaultCategories.filter(defCat =>
+      !dbCategories.some(dbCat => dbCat.name === defCat.name && dbCat.user_id === user.id)
+    ).map(cat => ({
+      ...cat,
+      user_id: user.id, // attach user
+    }));
+
+    // 3️⃣ Add missing defaults to DB
+    for (const cat of missingDefaults) {
+      await addCategoryDB(cat);
+    }
+
+    // 4️⃣ Merge DB categories with newly added defaults
+    dbCategories = [...dbCategories, ...missingDefaults];
+
+    // 5️⃣ Update state
+    setCategories(dbCategories);
+
+    // 6️⃣ Optional: cache in localStorage
+    const keys = STORAGE_KEYS(user.id);
+    saveToStorage(keys.CATEGORIES, dbCategories);
+  };
+
+  loadCategories();
+}, [user?.id]);
 
 
-  const addTransaction = async (transaction: Omit<Transaction, 'id' | 'user_id'>) => {
+
+
+
+
+  const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   if (!user?.id) {
     console.error("No logged in user, cannot add transaction.");
     return;
@@ -430,36 +466,59 @@ const addInvestment = async (investment: Omit<Investment, 'id' | 'user_id'>) => 
     id: Date.now().toString(),
     user_id: user.id,
   };
+  addTransaction({
+    type: 'investment',          
+    amount: investment.amount, 
+    category: 'Investment',
+    description: `Added investment: ${investment.name}`,
+    date: new Date().toISOString().split('T')[0],
+    time: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+    user_id: user.id,          
+  });
 
   try {
-    await addInvestmentDB(newInvestment); // save to SQLite
-    setInvestments(prev => [...prev, newInvestment]); // update React state
+    await addInvestmentDB(newInvestment); 
+    setInvestments(prev => [...prev, newInvestment]); 
     console.log("✅ Investment added:", newInvestment);
   } catch (err) {
     console.error("❌ Failed to add investment to DB:", err);
   }
 };
 
-const addLendRecord = (
-  lendRecord: Omit<LendRecord, 'id' | 'user_id' | 'status' | 'paidAmount' | 'remainingAmount'>,
+const addLendRecord = async (
+  lendRecord: Omit<LendRecord, 'status' | 'paidAmount' | 'remainingAmount'>,
   user_id: string
 ) => {
   const newLendRecord: LendRecord = {
     ...lendRecord,
-    id: Date.now().toString(),
-    user_id:user.id,
+    id: Date.now().toString(), // okay for now if your DB allows text IDs
+    user_id: user?.id,
     paidAmount: 0,
-    remainingAmount: calculateRemainingWithInterest({ ...lendRecord, paidAmount: 0 }),
+    remainingAmount: calculateRemainingWithInterest({ ...lendRecord, paidAmount: 0 }, []),
     status: 'active',
   };
 
   setLendRecords(prev => [...prev, newLendRecord]);
 
-  // Persist to DB
-  addLendRecordDB(newLendRecord).catch(err => console.error('Failed to add lend record to DB:', err));
+  try {
+    await addLendRecordDB(newLendRecord); // ✅ now properly awaited
+    console.log('✅ Lend record added:', newLendRecord);
+  } catch (err) {
+    console.error('Failed to add lend record to DB:', err);
+  }
 
-  console.log('✅ Lend record added:', newLendRecord);
+  addTransaction({
+    type: 'lend',
+    amount: newLendRecord.amount,
+    category: 'Lend',
+    description: `Lent money to ${newLendRecord.borrowerName}`,
+    date: new Date().toISOString().split('T')[0],
+    time: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+    user_id: user?.id,
+  });
 };
+
+
 
 
 const updateInvestment = async (id: string, updatedInvestment: Partial<Investment>) => {
@@ -478,22 +537,6 @@ const updateInvestment = async (id: string, updatedInvestment: Partial<Investmen
 };
 
 
-// TransactionContext.tsx (or wherever you have lendRecords state)
-const calculateRemainingWithInterest = (lend: LendRecord, prepayment: number = 0) => {
-  const principalRemaining = lend.amount - lend.paidAmount - prepayment;
-
-  const today = new Date();
-  const lendDate = new Date(lend.lendDate);
-
-  const monthsPassed = (today.getFullYear() - lendDate.getFullYear()) * 12
-                     + (today.getMonth() - lendDate.getMonth());
-
-  // Simple interest: Interest = P * R * T / 100
-  const interest = principalRemaining * (lend.interestRate / 100) * (monthsPassed / 12);
-
-  return Math.max(0, principalRemaining + interest);
-};
-
 const updateLendRecord = async (
   id: string,
   updates: Partial<LendRecord> & { prepaymentAmount?: number }
@@ -506,37 +549,51 @@ const updateLendRecord = async (
       let newRemainingAmount = lend.remainingAmount;
       let newStatus = lend.status;
 
-      // Handle prepayment
       if (updates.prepaymentAmount && updates.prepaymentAmount > 0) {
-        newPaidAmount += updates.prepaymentAmount;
-        newRemainingAmount = calculateRemainingWithInterest(lend, updates.prepaymentAmount);
+        const prepayAmount = updates.prepaymentAmount;
 
-        if (newRemainingAmount <= 0) newStatus = 'fully_paid';
-        else newStatus = 'partially_paid';
+        // 1️⃣ Update paid amount
+        newPaidAmount += prepayAmount;
+
+        // 2️⃣ Recalculate remaining amount (use lend.amount - newPaidAmount + interest)
+        newRemainingAmount = calculateRemainingWithInterest({
+          ...lend,
+          paidAmount: newPaidAmount,
+        });
+
+        // 3️⃣ Update status
+        newStatus = newRemainingAmount <= 0 ? 'fully_paid' : 'partially_paid';
+
+        // 4️⃣ Add transaction for prepayment
+        addTransaction({
+          user_id: lend.user_id,
+          type: 'income',
+          amount: prepayAmount,
+          category: 'Lend Repayment',
+          description: `Prepayment from ${lend.borrowerName}`,
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toTimeString().slice(0, 5),
+        }).catch(err => console.error('Failed to add transaction:', err));
       }
 
-      // Prepare the object to update in DB (exclude prepaymentAmount)
+      // Prepare final update object for DB
       const { prepaymentAmount, ...dbUpdate } = updates;
-
       const finalUpdate = {
         ...dbUpdate,
         paidAmount: newPaidAmount,
         remainingAmount: newRemainingAmount,
         status: newStatus,
       };
-      console.log("add");
-      // Update DB without prepaymentAmount
+
+      // Update in DB
       updateLendRecordDB(Number(id), finalUpdate).catch(err =>
         console.error('Failed to update DB:', err)
       );
 
-      // Update state
       return { ...lend, ...finalUpdate };
     })
   );
 };
-
-
 
 
   const addEMI = (emi: Omit<EMI, 'id'>) => {
@@ -574,23 +631,63 @@ const updateLendRecord = async (
   };
 
 
-  const addCategory = (category: Omit<Category, 'id'>) => {
-    const newCategory = {
+const addCategory = async (category: Omit<Category, 'id' | 'user_id'>) => {
+  if (!user?.id) return;
+
+  // 1️⃣ Check if category already exists for this user
+  const exists = categories.some(cat => cat.name === category.name && cat.user_id === user.id);
+  if (exists) {
+    console.warn("Category already exists:", category.name);
+    return;
+  }
+
+  // 2️⃣ Create new category object
+    const newCategory: Category = {
       ...category,
       id: Date.now().toString(),
+      user_id: user.id,
     };
-    setCategories(prev => [...prev, newCategory]);
+
+    // 3️⃣ Save to DB
+    try {
+      await addCategoryDB(newCategory);
+      setCategories(prev => [...prev, newCategory]);
+
+      // Optional: update localStorage cache
+      const keys = STORAGE_KEYS(user.id);
+      saveToStorage(keys.CATEGORIES, [...categories, newCategory]);
+
+      console.log("✅ Category added:", newCategory);
+    } catch (err) {
+      console.error("❌ Failed to add category:", err);
+    }
   };
 
-  const updateCategory = (id: string, updatedCategory: Partial<Category>) => {
+
+  const updateCategory = async (id: string, updatedCategory: Partial<Category>) => {
     setCategories(prev =>
       prev.map(cat => (cat.id === id ? { ...cat, ...updatedCategory } : cat))
     );
+
+    try {
+      await updateCategoryDB(id, updatedCategory); // ✅ update in SQLite
+      console.log("✅ Category updated:", id, updatedCategory);
+    } catch (err) {
+      console.error("❌ Failed to update category:", err);
+    }
   };
 
-  const deleteCategory = (id: string) => {
+  const deleteCategory = async (id: string) => {
     setCategories(prev => prev.filter(cat => cat.id !== id));
+
+    try {
+      await deleteCategoryDB(id); // ✅ remove from SQLite
+      console.log("🗑️ Category deleted:", id);
+    } catch (err) {
+      console.error("❌ Failed to delete category:", err);
+    }
   };
+
 
   const updateSubscription = async (id: string, updates: Partial<Subscription>) => {
     setSubscriptions(prev =>

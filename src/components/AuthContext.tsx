@@ -7,7 +7,7 @@ import {
   refreshToken,
 } from "../auth/auth-direct";
 
-type User = { id: string; email: string; name: string } | null;
+type User = { id: string; email: string; name: string, phone: number } | null;
 
 interface AuthContextType {
   user: User;

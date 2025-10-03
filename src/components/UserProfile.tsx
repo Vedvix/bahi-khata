@@ -27,16 +27,16 @@ interface UserData {
 }
 
 export function UserProfile() {
-  const {logoutFn } = useAuth();
+  const {logoutFn, user } = useAuth();
   const { exportData, importData, clearAllData } = useTransactions();
-  const [userData, setUserData] = useState<UserData>({
-    name: 'Rajesh Kumar',
-    email: 'rajesh.kumar@email.com',
-    phone: '+91 98765 43210',
-    currency: 'INR',
-    lastBackup: '2024-12-25T10:30:00Z',
+  const [userData, setUserData] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    currency: user?.currency || 'INR',
+    lastBackup: '', // can fetch last backup if stored
     autoBackup: true,
-    backupFrequency: 'daily'
+    backupFrequency: 'daily',
   });
 
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);

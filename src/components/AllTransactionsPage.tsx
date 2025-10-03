@@ -16,23 +16,26 @@ export function AllTransactionsPage({ transactions, onBack }: AllTransactionsPag
   // Filtering
   let filteredTransactions = transactions.filter(tx => {
     if (filterType === "all") return true;
+    if (filterType === "expense") return tx.type === "expense" || tx.type === "subscription";
+    if (filterType === "subscription") return tx.type === "subscription";
+    if (filterType === "lent") return tx.type === "lend";
+    if (filterType === "investment") return tx.type === "investment";
     return tx.type === filterType;
   });
 
   // Custom date range
   if (sortOption === "custom" && customRange.from && customRange.to) {
-  const fromDate = new Date(customRange.from);
-  fromDate.setHours(0, 0, 0, 0);
+    const fromDate = new Date(customRange.from);
+    fromDate.setHours(0, 0, 0, 0);
 
-  const toDate = new Date(customRange.to);
-  toDate.setHours(23, 59, 59, 999); // include the full day
+    const toDate = new Date(customRange.to);
+    toDate.setHours(23, 59, 59, 999);
 
-  filteredTransactions = filteredTransactions.filter(tx => {
-    const txDate = new Date(tx.date);
-    return txDate >= fromDate && txDate <= toDate;
-  });
-}
-
+    filteredTransactions = filteredTransactions.filter(tx => {
+      const txDate = new Date(tx.date);
+      return txDate >= fromDate && txDate <= toDate;
+    });
+  }
 
   // Sorting
   filteredTransactions.sort((a, b) => {
@@ -53,24 +56,43 @@ export function AllTransactionsPage({ transactions, onBack }: AllTransactionsPag
     return new Date(dateString).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   };
 
+  const getBadgeColor = (type: string) => {
+    switch (type) {
+      case "income": return "#16A34A"; // green
+      case "expense": return "#DC2626"; // red
+      case "subscription": return "#2563EB"; // blue
+      case "investment": return "#F59E0B"; // amber
+      case "lent": return "#6B7280"; // gray
+      default: return "#9CA3AF"; // light gray
+    }
+  };
+
   return (
-    <div className="p-4 bg-gray-50 min-h-screen">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">All Transactions</h2>
-        <button onClick={onBack} className="p-1 rounded hover:bg-gray-200">
+    <div style={{ padding: 20, backgroundColor: "#F3F4F6", minHeight: "100vh", fontFamily: "Arial, sans-serif" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h2 style={{ fontSize: 24, fontWeight: 700, color: "#111827" }}>All Transactions</h2>
+        <button onClick={onBack} style={{ padding: 6, borderRadius: 6, cursor: "pointer", border: "none", backgroundColor: "#E5E7EB" }}>
           <X size={24} />
         </button>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 24 }}>
         {["all", "income", "expense", "investment", "lent", "subscription"].map(type => (
           <button
             key={type}
-            className={`px-3 py-1 rounded ${
-              filterType === type ? "bg-indigo-600 text-white" : "bg-gray-200"
-            }`}
             onClick={() => setFilterType(type as any)}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 8,
+              cursor: "pointer",
+              backgroundColor: filterType === type ? "#4F46E5" : "#E5E7EB",
+              color: filterType === type ? "#FFFFFF" : "#111827",
+              fontWeight: 500,
+              border: "none",
+              transition: "0.2s"
+            }}
           >
             {type.charAt(0).toUpperCase() + type.slice(1)}
           </button>
@@ -78,11 +100,11 @@ export function AllTransactionsPage({ transactions, onBack }: AllTransactionsPag
       </div>
 
       {/* Sorting */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 24 }}>
         <select
-          className="border rounded px-2 py-1"
           value={sortOption}
           onChange={e => setSortOption(e.target.value as any)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 14 }}
         >
           <option value="dateDesc">Date ↓</option>
           <option value="dateAsc">Date ↑</option>
@@ -92,31 +114,59 @@ export function AllTransactionsPage({ transactions, onBack }: AllTransactionsPag
         </select>
 
         {sortOption === "custom" && (
-          <div className="border p-2 rounded">
+          <div style={{ border: "1px solid #D1D5DB", padding: 8, borderRadius: 6 }}>
             <Calendar mode="range" selected={customRange} onSelect={setCustomRange} />
           </div>
         )}
       </div>
 
       {/* Transaction list */}
-      <div className="space-y-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {filteredTransactions.map(tx => (
-          <div key={tx.id} className="flex justify-between p-3 bg-white rounded-lg shadow-sm border">
+          <div
+            key={tx.id}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: 16,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 12,
+              border: "1px solid #E5E7EB",
+              boxShadow: "0 4px 8px rgba(0,0,0,0.05)",
+              transition: "transform 0.2s",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.transform = "scale(1.02)")}
+            onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
+          >
             <div>
-              <p className="font-medium">{tx.category || tx.type}</p>
-              <p className="text-sm text-gray-500">{tx.description || "-"}</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span
+                  style={{
+                    backgroundColor: getBadgeColor(tx.type),
+                    color: "#fff",
+                    padding: "2px 8px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
+                </span>
+                <p style={{ fontWeight: 600, fontSize: 16 }}>{tx.category || "-"}</p>
+              </div>
+              <p style={{ fontSize: 13, color: "#6B7280" }}>{tx.description || "-"}</p>
             </div>
-            <div className="text-right">
-              <p className={`font-semibold ${tx.type === "income" ? "text-green-600" : "text-red-600"}`}>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontWeight: 700, fontSize: 16, color: tx.type === "income" ? "#16A34A" : "#DC2626" }}>
                 {tx.type === "income" ? "+" : "-"}{formatCurrency(tx.amount)}
               </p>
-              <p className="text-xs text-gray-500">{formatDate(tx.date)}</p>
+              <p style={{ fontSize: 11, color: "#6B7280" }}>{formatDate(tx.date)}</p>
             </div>
           </div>
         ))}
 
         {filteredTransactions.length === 0 && (
-          <p className="text-gray-500 text-center mt-4">No transactions found.</p>
+          <p style={{ color: "#6B7280", textAlign: "center", marginTop: 20, fontSize: 14 }}>No transactions found.</p>
         )}
       </div>
     </div>

@@ -12,16 +12,18 @@ import { InvestmentLending } from './components/InvestmentLending';
 import { Analytics } from './components/Analytics';
 import { UserProfile } from './components/UserProfile';
 import { BottomNavigation } from './components/BottomNavigation';
+import { EMISubscriptions } from './components/EMISubscriptions';
 
 
 
 function MainAppShell() {
-  const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'investments'|'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'subscriptions'|'investments'|'profile'>('dashboard');
 
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'transactions': return <TransactionEntry />;
+      //case 'subscriptions' :return <EMISubscriptions />;
       case 'subscriptions': return <Subscriptions />;
       case 'investments': return <InvestmentLending />;
       case 'profile': return <UserProfile />;
