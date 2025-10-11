@@ -1,207 +1,113 @@
-// Mock Google Drive Backup Service
-// In a real implementation, this would integrate with Google Drive API
+// //complete working code for localhost
+
+declare const gapi: any;
+declare const google: any;
 
 export interface BackupMetadata {
   timestamp: string;
-  fileSize: number;
-  checksum: string;
-  version: string;
+  fileId?: string;
+  fileName?: string;
+  version?: string;
 }
-
-export class BackupService {
-  private static readonly BACKUP_FOLDER = 'FinTrack Backups';
-  private static readonly FILE_PREFIX = 'fintrack-backup-';
-
-  // Mock Google Drive authentication
-  static async authenticate(): Promise<boolean> {
-    return new Promise((resolve) => {
-      // Simulate auth flow
-      setTimeout(() => {
-        console.log('Google Drive authentication successful');
-        resolve(true);
-      }, 1000);
-    });
-  }
-
-  // Mock backup to Google Drive
-  static async backupToGoogleDrive(data: string): Promise<BackupMetadata> {
-    return new Promise((resolve, reject) => {
-      // Simulate network request
-      setTimeout(() => {
-        try {
-          const timestamp = new Date().toISOString();
-          const metadata: BackupMetadata = {
-            timestamp,
-            fileSize: new Blob([data]).size,
-            checksum: this.generateChecksum(data),
-            version: '1.0'
-          };
-          
-          // In real implementation, this would:
-          // 1. Upload file to Google Drive
-          // 2. Store in designated backup folder
-          // 3. Return actual file metadata
-          
-          console.log('Backup uploaded to Google Drive:', metadata);
-          resolve(metadata);
-        } catch (error) {
-          reject(error);
-        }
-      }, 2000);
-    });
-  }
-
-  // Mock restore from Google Drive
-  static async restoreFromGoogleDrive(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      // Simulate network request
-      setTimeout(() => {
-        try {
-          // In real implementation, this would:
-          // 1. List backup files from Google Drive
-          // 2. Download the latest backup
-          // 3. Return the file content
-          
-          const mockBackupData = {
-            transactions: [],
-            investments: [],
-            lendRecords: [],
-            emis: [],
-            subscriptions: [],
-            categories: [],
-            exportDate: new Date().toISOString(),
-            version: '1.0'
-          };
-          
-          console.log('Backup restored from Google Drive');
-          resolve(JSON.stringify(mockBackupData));
-        } catch (error) {
-          reject(error);
-        }
-      }, 2000);
-    });
-  }
-
-  // Mock list backups from Google Drive
-  static async listBackups(): Promise<BackupMetadata[]> {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Mock backup list
-        const backups: BackupMetadata[] = [
-          {
-            timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-            fileSize: 1024,
-            checksum: 'abc123',
-            version: '1.0'
-          },
-          {
-            timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-            fileSize: 1000,
-            checksum: 'def456',
-            version: '1.0'
-          }
-        ];
-        
-        console.log('Retrieved backup list from Google Drive');
-        resolve(backups);
-      }, 1000);
-    });
-  }
-
-  // Auto backup functionality
-  static async setupAutoBackup(frequency: 'daily' | 'weekly' | 'monthly', dataExporter: () => string): Promise<void> {
-    const intervalMs = frequency === 'daily' ? 24 * 60 * 60 * 1000 :
-                     frequency === 'weekly' ? 7 * 24 * 60 * 60 * 1000 :
-                     30 * 24 * 60 * 60 * 1000;
-
-    // In a real app, this would use background tasks or service workers
-    setInterval(async () => {
-      try {
-        const data = dataExporter();
-        await this.backupToGoogleDrive(data);
-        console.log(`Auto backup completed (${frequency})`);
-      } catch (error) {
-        console.error('Auto backup failed:', error);
-      }
-    }, intervalMs);
-  }
-
-  // Generate a simple checksum for data integrity
-  private static generateChecksum(data: string): string {
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      const char = data.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return Math.abs(hash).toString(16);
-  }
-
-  // Check if backup is needed based on last backup time
-  static isBackupNeeded(lastBackup: string, frequency: 'daily' | 'weekly' | 'monthly'): boolean {
-    const lastBackupDate = new Date(lastBackup);
-    const now = new Date();
-    const timeDiff = now.getTime() - lastBackupDate.getTime();
-    
-    const thresholds = {
-      daily: 24 * 60 * 60 * 1000,
-      weekly: 7 * 24 * 60 * 60 * 1000,
-      monthly: 30 * 24 * 60 * 60 * 1000
-    };
-    
-    return timeDiff > thresholds[frequency];
-  }
-}
-
-// Real Google Drive integration would require:
-// 1. Google Drive API credentials
-// 2. OAuth 2.0 authentication flow
-// 3. Proper error handling and retry logic
-// 4. File versioning and conflict resolution
-// 5. Encryption for sensitive financial data
-// 6. Background sync capabilities
-
-/*
-Example real implementation structure:
-
 export class GoogleDriveBackupService {
-  private static readonly CLIENT_ID = 'YOUR_GOOGLE_DRIVE_CLIENT_ID';
-  private static readonly API_KEY = 'YOUR_GOOGLE_DRIVE_API_KEY';
-  private static readonly DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+  private static readonly CLIENT_ID = '213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com';
   private static readonly SCOPES = 'https://www.googleapis.com/auth/drive.file';
+  private static tokenClient: any;
 
-  static async initializeGapi() {
-    await gapi.load('client:auth2', this.initializeGapiClient);
-  }
+  /** Initialize gapi client and GSI token client */
+  static async initialize(): Promise<void> {
+    console.log('[BackupService] Initializing GAPI and Google Identity Services...');
+    if (typeof gapi === 'undefined') {
+      throw new Error('gapi not found. Add <script src="https://apis.google.com/js/api.js"></script> to index.html');
+    }
+    if (typeof google === 'undefined') {
+      throw new Error('google identity services not found. Add <script src="https://accounts.google.com/gsi/client" async defer></script> to index.html');
+    }
 
-  static async initializeGapiClient() {
-    await gapi.client.init({
-      apiKey: this.API_KEY,
-      clientId: this.CLIENT_ID,
-      discoveryDocs: [this.DISCOVERY_DOC],
-      scope: this.SCOPES
+    await new Promise<void>((resolve, reject) => {
+      gapi.load('client', async () => {
+        try {
+          await gapi.client.init({
+            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+          });
+          console.log('[BackupService] GAPI client initialized successfully.');
+          resolve();
+        } catch (err) {
+          console.error('[BackupService] Failed to initialize gapi client', err);
+          reject(err);
+        }
+      });
     });
+
+    this.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: this.CLIENT_ID,
+      scope: this.SCOPES,
+      callback: (tokenResponse: any) => {
+        console.log('[BackupService] OAuth token received', tokenResponse);
+      },
+    });
+    console.log('[BackupService] Token client initialized.');
   }
 
-  static async authenticate(): Promise<boolean> {
-    const authInstance = gapi.auth2.getAuthInstance();
-    const user = await authInstance.signIn();
-    return user.isSignedIn();
-  }
+  /** Request access token via GSI */
+private static accessToken: string | null = null;
 
-  static async uploadFile(fileName: string, content: string): Promise<any> {
-    const boundary = '-------314159265358979323846';
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
+static async authenticate(): Promise<string> {
+  if (this.accessToken) return this.accessToken;
 
-    const metadata = {
-      'name': fileName,
-      'parents': [await this.getOrCreateBackupFolder()]
+  if (!this.tokenClient) throw new Error('Token client not initialized');
+
+  return new Promise((resolve, reject) => {
+    this.tokenClient.callback = (tokenResponse: any) => {
+      if (tokenResponse.error) reject(tokenResponse);
+      else {
+        this.accessToken = tokenResponse.access_token;
+        resolve(this.accessToken);
+      }
     };
+    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+  });
+}
 
+
+  /** Get or create backup folder */
+  private static async getOrCreateBackupFolder(): Promise<string> {
+    const folderName = 'FinTrack Backups';
+    console.log(`[BackupService] Checking if folder "${folderName}" exists...`);
+    const listResp = await gapi.client.drive.files.list({
+      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`,
+      fields: 'files(id, name)',
+    });
+
+    if (listResp.result.files && listResp.result.files.length > 0) {
+      console.log('[BackupService] Folder exists, ID:', listResp.result.files[0].id);
+      return listResp.result.files[0].id;
+    }
+
+    console.log('[BackupService] Folder not found, creating folder...');
+    const createResp = await gapi.client.drive.files.create({
+      resource: { name: folderName, mimeType: 'application/vnd.google-apps.folder' },
+      fields: 'id',
+    });
+
+    console.log('[BackupService] Folder created with ID:', createResp.result.id);
+    return createResp.result.id;
+  }
+
+  /** Upload JSON/text file to Drive */
+  static async uploadFile(fileName: string, content: string): Promise<BackupMetadata> {
+    console.log(`[BackupService] Uploading file "${fileName}"...`);
+    await this.authenticate();
+    const parentId = await this.getOrCreateBackupFolder();
+
+    const boundary = '-------314159265358979323846';
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const close_delim = `\r\n--${boundary}--`;
+
+    const metadata = { name: fileName, parents: [parentId] };
     const multipartRequestBody =
       delimiter +
-      'Content-Type: application/json\r\n\r\n' +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
       JSON.stringify(metadata) +
       delimiter +
       'Content-Type: application/json\r\n\r\n' +
@@ -209,16 +115,144 @@ export class GoogleDriveBackupService {
       close_delim;
 
     const request = gapi.client.request({
-      'path': 'https://www.googleapis.com/upload/drive/v3/files',
-      'method': 'POST',
-      'params': {'uploadType': 'multipart'},
-      'headers': {
-        'Content-Type': 'multipart/related; boundary="' + boundary + '"'
-      },
-      'body': multipartRequestBody
+      path: 'https://www.googleapis.com/upload/drive/v3/files',
+      method: 'POST',
+      params: { uploadType: 'multipart' },
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: multipartRequestBody,
     });
 
-    return request;
+    const response = await request;
+    console.log('[BackupService] File uploaded:', response.result);
+    return {
+      timestamp: new Date().toISOString(),
+      fileId: response.result.id,
+      fileName: response.result.name,
+      version: '1.0',
+    };
+  }
+
+  /** List JSON backups */
+  static async listBackups(): Promise<BackupMetadata[]> {
+    console.log('[BackupService] Listing backups...');
+    await this.authenticate();
+    const folderId = await this.getOrCreateBackupFolder();
+    const resp = await gapi.client.drive.files.list({
+      q: `'${folderId}' in parents and mimeType='application/json' and trashed=false`,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'createdTime desc',
+    });
+    console.log('[BackupService] Found files:', resp.result.files);
+    return (resp.result.files || []).map((f: any) => ({
+      timestamp: f.createdTime,
+      fileId: f.id,
+      fileName: f.name,
+      version: '1.0',
+    }));
+  }
+
+  /** Download backup content by fileId */
+  static async downloadFile(fileId: string): Promise<string> {
+    console.log('[BackupService] Downloading file ID:', fileId);
+    await this.authenticate();
+    const resp = await gapi.client.drive.files.get({ fileId, alt: 'media' });
+    console.log('[BackupService] File content retrieved.');
+    return resp.body || JSON.stringify(resp.result) || '';
   }
 }
-*/
+
+
+// // GoogleDriveBackupService.ts
+// import { gapi } from 'gapi-script';
+// import{ GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+// import { Capacitor } from '@capacitor/core';
+
+// export interface FileMeta {
+//   id?: string;
+//   name: string;
+//   mimeType?: string;
+//   timestamp?: string;
+// }
+
+// export class GoogleDriveBackupService {
+//   private static accessToken: string | null = null;
+
+//   // Authenticate and get access token
+// static async authenticate(): Promise<string> {
+//   if (Capacitor.isNativePlatform()) {
+//     const user = await GoogleAuth.signIn({
+//       scopes: 'https://www.googleapis.com/auth/drive.file',
+//     });
+//     this.accessToken = user.authentication.accessToken;
+//     console.log('[BackupService] Native token received');
+//   } else {
+//     // Web auth (GAPI)
+//     if (!gapi.client.getToken()) {
+//       await new Promise<void>((resolve, reject) => {
+//         gapi.load('client:auth2', async () => {
+//           try {
+//             await gapi.client.init({
+//               clientId: '213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com',
+//               discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+//               scope: 'https://www.googleapis.com/auth/drive.file',
+//             });
+//             const authInstance = gapi.auth2.getAuthInstance();
+//             if (!authInstance.isSignedIn.get()) await authInstance.signIn();
+//             const googleUser = authInstance.currentUser.get();
+//             this.accessToken = googleUser.getAuthResponse().access_token;
+//             gapi.client.setToken({ access_token: this.accessToken });
+//             resolve();
+//           } catch (err) {
+//             console.error('[BackupService] GAPI auth failed', err);
+//             reject(err);
+//           }
+//         });
+//       });
+//     } else {
+//       this.accessToken = gapi.client.getToken().access_token;
+//     }
+//   }
+
+//   return this.accessToken!;
+// }
+
+
+//   // Upload a file to Google Drive
+//   static async uploadFile(fileName: string, content: string): Promise<FileMeta> {
+//     if (!this.accessToken) {
+//       await this.authenticate();
+//     }
+
+//     const boundary = '-------314159265358979323846';
+//     const metadata = { name: fileName, mimeType: 'application/json' };
+//     const body =
+//       `\r\n--${boundary}\r\n` +
+//       'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+//       JSON.stringify(metadata) +
+//       `\r\n--${boundary}\r\n` +
+//       'Content-Type: application/json\r\n\r\n' +
+//       content +
+//       `\r\n--${boundary}--`;
+
+//     const res = await fetch(
+//       'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+//       {
+//         method: 'POST',
+//         headers: {
+//           Authorization: `Bearer ${this.accessToken}`,
+//           'Content-Type': `multipart/related; boundary=${boundary}`,
+//         },
+//         body,
+//       }
+//     );
+
+//     const result = await res.json();
+//     console.log('[BackupService] File uploaded', result);
+
+//     return {
+//       id: result.id,
+//       name: result.name,
+//       timestamp: new Date().toISOString(),
+//     };
+//   }
+// }

@@ -15,7 +15,6 @@ import { BottomNavigation } from './components/BottomNavigation';
 import { EMISubscriptions } from './components/EMISubscriptions';
 
 
-
 function MainAppShell() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'subscriptions'|'investments'|'profile'>('dashboard');
 
@@ -23,8 +22,8 @@ function MainAppShell() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'transactions': return <TransactionEntry />;
-      //case 'subscriptions' :return <EMISubscriptions />;
-      case 'subscriptions': return <Subscriptions />;
+      case 'subscriptions' :return <EMISubscriptions />;
+      //case 'subscriptions': return <Subscriptions />;
       case 'investments': return <InvestmentLending />;
       case 'profile': return <UserProfile />;
       default: return <Dashboard />;

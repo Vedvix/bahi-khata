@@ -14,14 +14,13 @@ import { useAuth } from './AuthContext';
 
 export function TransactionEntry() {
   const { user } = useAuth();
-  const { categories, addTransaction, addInvestment, addLendRecord } = useTransactions();
+  const { categories, addTransaction, addInvestment, addLendRecord, addCategory } = useTransactions();
   const [transactionType, setTransactionType] = useState<'income' | 'expense' | 'investment' | 'lend'>('expense');
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
-  const { addCategory } = useTransactions();
   
   // Investment-specific fields
   const [investmentType, setInvestmentType] = useState<'mutual_fund' | 'stocks' | 'ppf' | 'fd' | 'gold' | 'crypto' | 'bonds'>('mutual_fund');

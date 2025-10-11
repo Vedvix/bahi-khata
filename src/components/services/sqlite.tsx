@@ -1,10 +1,14 @@
-import initSqlJs from 'sql.js';
+
+// OR dynamic (prevents Vite pre-bundling entirely)
+const { default: initSqlJs } = await import('sql.js/dist/sql-wasm.js');
 
 export let db: any = null;
 
 export async function initDB() {
-  const SQL = await initSqlJs({ locateFile: file => `/sql-wasm.wasm` });
-  db = new SQL.Database();
+//  const SQL = await initSqlJs({ locateFile: file => `/sql-wasm.wasm` });
+const SQL = await initSqlJs({ locateFile: file => '/sql-wasm.wasm' });
+  
+db = new SQL.Database();
 
   // Run all table creation SQL at once
   db.run(`
@@ -26,7 +30,7 @@ export async function initDB() {
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
-      type TEXT CHECK(type IN ('income', 'expense', 'investment', 'lend', 'subscription')) NOT NULL,
+      type TEXT CHECK(type IN ('income', 'expense', 'investment', 'lend', 'subscription','emi')) NOT NULL,
       amount REAL NOT NULL,
       category TEXT,
       description TEXT,

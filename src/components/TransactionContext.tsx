@@ -1,17 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
+import toast from 'react-hot-toast';
 import { db } from './services/sqlite';
 import { initDB } from './services/sqlite';
 import { useAuth } from './AuthContext';
 import {  addSubscription as addSubscriptionDB,  
           updateSubscription as updateSubscriptionDB, 
-          deleteSubscription as deleteSubscriptionDB } from './services/subscriptions';
-import { addInvestmentDB, updateInvestmentDB } from './services/investments';
-import { addTransactionDB } from './services/transactions';
-import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, 
+          deleteSubscription as deleteSubscriptionDB,
+          getSubscriptions } from './services/subscriptions';
+import { addInvestmentDB, updateInvestmentDB, getInvestmentsDB } from './services/investments';
+import { addTransactionDB, getTransactionsDB } from './services/transactions';
+import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, getLendRecordsDB,
         calculateRemainingWithInterest } from './services/lendmoney';
 import { addCategoryDB, getCategoriesDB, updateCategoryDB, deleteCategoryDB } from './services/categories';
 import { addPrepaymentDB, getPrepaymentsDB } from './services/prepayment';
+import { addEMI as addEMIDB, updateEMI as updateEMIDB } from './services/emi';
+import { importAndPersist } from './services/importHelper';
+import CryptoJS from 'crypto-js';
 
 
 export interface Transaction {
@@ -55,6 +59,7 @@ export interface LendRecord {
 
 export interface EMI {
   id: string;
+  user_id?: string;
   name: string;
   totalAmount: number;
   monthlyEMI: number;
@@ -77,6 +82,7 @@ export interface Subscription {
 
 export interface Category {
   id: string;
+  user_id: string;
   name: string;
   icon: string;
   color: string;
@@ -96,6 +102,7 @@ interface TransactionContextType {
   updateInvestment: (id: string, investment: Partial<Investment>) => void;
   updateLendRecord: (id: string, lendRecord: Partial<LendRecord>) => void;
   addEMI: (emi: Omit<EMI, 'id'>) => void;
+  updateEMI: (id: string, emi: Partial<EMI>) => void;
   addSubscription: (subscription: Omit<Subscription, 'id'>) => void;
   updateSubscription: (id: string, subscription: Partial<Subscription>) => void;
   deleteSubscription: (id: string) => void;
@@ -103,7 +110,8 @@ interface TransactionContextType {
   updateCategory: (id: string, category: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
   exportData: () => string;
-  importData: (data: string) => boolean;
+//  importData: (data: string) => boolean;
+  importData: (data: string, password?: string) => boolean; 
   clearAllData: () => void;
 }
 
@@ -331,9 +339,9 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
-    useEffect(() => {
-  initDB().then(() => console.log('DB initialized'));
-}, []);
+  useEffect(() => {
+    initDB().then(() => console.log('DB initialized'));
+  }, []);
   // Load data from localStorage on mount
 
   useEffect(() => {
@@ -394,7 +402,6 @@ useEffect(() => {
   saveToStorage(keys.SUBSCRIPTIONS, subscriptions);
 }, [subscriptions, user?.id]);
 
-// Save categories per user
 useEffect(() => {
   if (!user?.id) return;
 
@@ -429,10 +436,7 @@ useEffect(() => {
   loadCategories();
 }, [user?.id]);
 
-
-
-
-
+  
 
   const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   if (!user?.id) {
@@ -596,13 +600,29 @@ const updateLendRecord = async (
 };
 
 
-  const addEMI = (emi: Omit<EMI, 'id'>) => {
-    const newEMI = {
-      ...emi,
-      id: Date.now().toString(),
-    };
+const addEMI = async (emi: Omit<EMI, 'id' | 'user_id'>) => {
+  if (!user?.id) return;
+
+  const newEMI: EMI = { ...emi, id: Date.now().toString(), user_id: user.id };
+
+  try {
+    await addEMIDB(newEMI);
     setEMIs(prev => [...prev, newEMI]);
-  };
+  } catch (err) {
+    console.error('Failed to add EMI:', err);
+  }
+};
+
+const updateEMI = async (id: string, updates: Partial<EMI>) => {
+  setEMIs(prev => prev.map(e => (e.id === id ? { ...e, ...updates } : e)));
+
+  try {
+    await updateEMIDB(Number(id), updates);
+  } catch (err) {
+    console.error('Failed to update EMI in DB:', err);
+  }
+};
+
 
 
 
@@ -711,8 +731,22 @@ const addCategory = async (category: Omit<Category, 'id' | 'user_id'>) => {
     }
   };
 
-  const exportData = (): string => {
-    const exportData = {
+  // const exportData = (): string => {
+  //   const exportData = {
+  //     transactions,
+  //     investments,
+  //     lendRecords,
+  //     emis,
+  //     subscriptions,
+  //     categories,
+  //     exportDate: new Date().toISOString(),
+  //     version: '1.0'
+  //   };
+  //   return JSON.stringify(exportData, null, 2);
+  // };
+const exportData = (password?: string): string => {
+  console.log("called export");
+    const dataToExport = { 
       transactions,
       investments,
       lendRecords,
@@ -722,32 +756,64 @@ const addCategory = async (category: Omit<Category, 'id' | 'user_id'>) => {
       exportDate: new Date().toISOString(),
       version: '1.0'
     };
-    return JSON.stringify(exportData, null, 2);
+    const jsonString = JSON.stringify(dataToExport);
+
+    if (password) {
+      return CryptoJS.AES.encrypt(jsonString, password).toString();
+    }
+
+    return jsonString;
   };
 
-  const importData = (dataString: string): boolean => {
+// const importData = (dataString: string): boolean => {
+//   try {
+//     const data = JSON.parse(dataString);
+
+//     // Validate the data structure
+//     if (!data.version || !data.exportDate) {
+//       throw new Error('Invalid backup file format');
+//     }
+
+//     // Import data
+//     if (data.transactions) setTransactions(data.transactions);
+//     if (data.investments) setInvestments(data.investments);
+//     if (data.lendRecords) setLendRecords(data.lendRecords);
+//     if (data.emis) setEMIs(data.emis);
+//     if (data.subscriptions) setSubscriptions(data.subscriptions);
+//     if (data.categories) setCategories(data.categories);
+
+//     return true;
+//   } catch (error) {
+//     console.error('Failed to import data:', error);
+//     return false;
+//   }
+// };
+
+ const importData = (data: string, password?: string): boolean => {
     try {
-      const data = JSON.parse(dataString);
-      
-      // Validate the data structure
-      if (!data.version || !data.exportDate) {
-        throw new Error('Invalid backup file format');
+      let jsonString = data;
+
+      if (password) {
+        const bytes = CryptoJS.AES.decrypt(data, password);
+        jsonString = bytes.toString(CryptoJS.enc.Utf8);
       }
 
-      // Import data
-      if (data.transactions) setTransactions(data.transactions);
-      if (data.investments) setInvestments(data.investments);
-      if (data.lendRecords) setLendRecords(data.lendRecords);
-      if (data.emis) setEMIs(data.emis);
-      if (data.subscriptions) setSubscriptions(data.subscriptions);
-      if (data.categories) setCategories(data.categories);
+      const parsedData = JSON.parse(jsonString);
+
+      if (parsedData.transactions) setTransactions(parsedData.transactions);
+      if (parsedData.investments) setInvestments(parsedData.investments);
+      if (parsedData.lendRecords) setLendRecords(parsedData.lendRecords);
+      if (parsedData.emis) setEMIs(parsedData.emis);
+      if (parsedData.subscriptions) setSubscriptions(parsedData.subscriptions);
+      if (parsedData.categories) setCategories(parsedData.categories);
 
       return true;
-    } catch (error) {
-      console.error('Failed to import data:', error);
+    } catch (err) {
+      console.error(err);
       return false;
     }
   };
+
 
   const clearAllData = () => {
     setTransactions([]);
@@ -778,6 +844,7 @@ const addCategory = async (category: Omit<Category, 'id' | 'user_id'>) => {
         updateInvestment,
         updateLendRecord,
         addEMI,
+        updateEMI,
         addSubscription,
         updateSubscription,
         deleteSubscription,

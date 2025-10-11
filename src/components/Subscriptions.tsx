@@ -41,6 +41,23 @@ export function Subscriptions() {
   const { subscriptions, addSubscription, addTransaction, updateSubscription } = useTransactions();
   const { user } = useAuth(); 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  React.useEffect(() => {
+    if (!user?.id) return;
+
+    const checkAutoPay = async () => {
+      const today = new Date().toISOString().split("T")[0];
+
+      subscriptions.forEach(sub => {
+        if (sub.autoPayEnabled && new Date(sub.nextDueDate) <= new Date(today)) {
+          console.log(`🔄 Auto-paying: ${sub.name}`);
+          processSubscriptionPayment(sub);
+        }
+      });
+    };
+
+    checkAutoPay();
+    }, [user?.id, subscriptions]);
+
   
   const [formData, setFormData] = useState({
     name: '',
@@ -75,7 +92,7 @@ export function Subscriptions() {
     setIsAddDialogOpen(false);
   };
 
-const handleMarkPaid = (subscription: Subscription) => {
+const processSubscriptionPayment = (subscription: Subscription) => {
   if (!user?.id) return;
 
   const today = new Date();
@@ -88,9 +105,10 @@ const handleMarkPaid = (subscription: Subscription) => {
     description: `Paid ${subscription.name} subscription`,
     date: today.toISOString().split('T')[0],
     time: timeString,
-    user_id: user.id, // include user_id
+    user_id: user.id,
   });
 
+  // Calculate next due date
   let nextDue = new Date(subscription.nextDueDate);
   if (subscription.frequency === 'monthly') nextDue.setMonth(nextDue.getMonth() + 1);
   if (subscription.frequency === 'quarterly') nextDue.setMonth(nextDue.getMonth() + 3);
@@ -99,6 +117,11 @@ const handleMarkPaid = (subscription: Subscription) => {
   updateSubscription(subscription.id, {
     nextDueDate: nextDue.toISOString().split('T')[0],
   });
+};
+
+
+const handleMarkPaid = (subscription: Subscription) => {
+  processSubscriptionPayment(subscription);
 };
 
 

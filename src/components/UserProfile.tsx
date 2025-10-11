@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Settings, Lock, Shield, Download, Upload, Cloud, Smartphone, Eye, EyeOff, Check, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -11,7 +11,11 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner@2.0.3';
 import { useTransactions } from './TransactionContext';
-import { BackupService } from './BackupService';
+// import { BackupService } from './BackupService';
+import { GoogleDriveBackupService } from './BackupService';
+import CryptoJS from 'crypto-js';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { gapi } from 'gapi-script';
 
 import { changePassword, updateUserInfo, logout } from '../auth/auth-direct';
 import { useAuth } from './AuthContext';
@@ -51,6 +55,17 @@ export function UserProfile() {
     confirm: false
   });
   const [isBackupInProgress, setIsBackupInProgress] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        await GoogleDriveBackupService.initialize();
+        console.log('Google Drive initialized');
+      } catch (err) {
+        console.error('Drive init failed', err);
+        toast.error('Failed to initialize Google Drive. Check console.');
+      }
+    })();
+  }, []);
 
 const handlePasswordChange = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -96,77 +111,208 @@ const handleUpdateInfo = async () => {
   }
 };
 
-  const handleBackupToCloud = async () => {
-    setIsBackupInProgress(true);
+  // const handleBackupToCloud = async () => {
+  //   setIsBackupInProgress(true);
     
-    try {
-      // Authenticate with Google Drive
-      await BackupService.authenticate();
+  //   try {
+  //     // Authenticate with Google Drive
+  //     await BackupService.authenticate();
       
-      // Export current data
-      const dataToBackup = exportData();
+  //     // Export current data
+  //     const dataToBackup = exportData();
       
-      // Upload to Google Drive
-      const metadata = await BackupService.backupToGoogleDrive(dataToBackup);
+  //     // Upload to Google Drive
+  //     const metadata = await BackupService.backupToGoogleDrive(dataToBackup);
       
-      setUserData(prev => ({
-        ...prev,
-        lastBackup: metadata.timestamp
-      }));
+  //     setUserData(prev => ({
+  //       ...prev,
+  //       lastBackup: metadata.timestamp
+  //     }));
       
-      toast.success('Data backed up to Google Drive successfully');
-    } catch (error) {
-      toast.error('Backup failed. Please try again.');
-      console.error('Backup error:', error);
-    } finally {
-      setIsBackupInProgress(false);
-    }
-  };
+  //     toast.success('Data backed up to Google Drive successfully');
+  //   } catch (error) {
+  //     toast.error('Backup failed. Please try again.');
+  //     console.error('Backup error:', error);
+  //   } finally {
+  //     setIsBackupInProgress(false);
+  //   }
+  // };
 
+// add this import at top of the file if not already present:
+// import { GoogleDriveBackupService } from './GoogleDriveBackupService';
+
+const handleBackupToCloud = async () => {
+  setIsBackupInProgress(true);
+
+  try {
+    const password = prompt('Enter a password to encrypt this backup (remember this password to restore):');
+    if (!password) {
+      toast.error('Backup cancelled — password is required.');
+      return;
+    }
+
+    const dataToBackup = exportData();
+    if (!dataToBackup) {
+      toast.error('No data to backup.');
+      return;
+    }
+
+    const encrypted = CryptoJS.AES.encrypt(dataToBackup, password).toString();
+
+    // Authenticate and get access token
+    const accessToken = await GoogleDriveBackupService.authenticate();
+    gapi.client.setToken({ access_token: accessToken });
+
+    const timestamp = new Date().toISOString();
+    const fileName = `fintrack-backup-${timestamp}.json.enc`;
+    const meta = await GoogleDriveBackupService.uploadFile(fileName, encrypted);
+
+    setUserData(prev => ({
+      ...prev,
+      lastBackup: meta.timestamp || timestamp
+    }));
+
+    toast.success('Data backed up to Google Drive successfully');
+  } catch (err: any) {
+    console.error('Backup error:', err);
+    if (err?.error === 'popup_closed_by_user') {
+      toast.error('Authentication was cancelled. Backup aborted.');
+    } else {
+      toast.error(err.message || 'Backup failed. Please try again.');
+    }
+  } finally {
+    setIsBackupInProgress(false);
+  }
+};
+
+
+
+  // const handleImportData = () => {
+  //   const input = document.createElement('input');
+  //   input.type = 'file';
+  //   input.accept = '.json';
+  //   input.onchange = (e) => {
+  //     const file = (e.target as HTMLInputElement).files?.[0];
+  //     if (file) {
+  //       const reader = new FileReader();
+  //       reader.onload = (event) => {
+  //         const content = event.target?.result as string;
+  //         if (content) {
+  //           const success = importData(content);
+  //           if (success) {
+  //             toast.success(`Data imported from ${file.name} successfully`);
+  //           } else {
+  //             toast.error('Failed to import data. Please check the file format.');
+  //           }
+  //         }
+  //       };
+  //       reader.readAsText(file);
+  //     }
+  //   };
+  //   input.click();
+  // };
   const handleImportData = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const content = event.target?.result as string;
-          if (content) {
-            const success = importData(content);
-            if (success) {
-              toast.success(`Data imported from ${file.name} successfully`);
-            } else {
-              toast.error('Failed to import data. Please check the file format.');
-            }
-          }
-        };
-        reader.readAsText(file);
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    const password = prompt('Enter the password to decrypt this backup:');
+    if (!password) {
+      toast.error('Password is required for decryption');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const success = importData(content, password); // pass password
+        if (success) {
+          toast.success(`Data imported from ${file.name} successfully`);
+        } else {
+          toast.error('Failed to import data. Check password or file.');
+        }
       }
     };
-    input.click();
+    reader.readAsText(file);
   };
+  input.click();
+};
 
-  const handleExportData = () => {
-    try {
-      const dataToExport = exportData();
-      const blob = new Blob([dataToExport], { type: 'application/json' });
+
+  // const handleExportData = () => {
+  //   try {
+  //     const dataToExport = exportData();
+  //     const blob = new Blob([dataToExport], { type: 'application/json' });
+  //     const url = URL.createObjectURL(blob);
+  //     const a = document.createElement('a');
+  //     a.href = url;
+  //     a.download = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
+  //     document.body.appendChild(a);
+  //     a.click();
+  //     document.body.removeChild(a);
+  //     URL.revokeObjectURL(url);
+      
+  //     toast.success('Data exported successfully');
+  //   } catch (error) {
+  //     toast.error('Failed to export data');
+  //     console.error('Export error:', error);
+  //   }
+  // };
+const handleExportData = async () => {
+  try {
+    const dataToExport = exportData(); // call your context's exportData
+    if (!dataToExport) {
+      toast.error('No data to export');
+      return;
+    }
+
+    // Ask user for password
+    const password = prompt('Enter a password to encrypt this backup:');
+    if (!password) {
+      toast.error('Password is required to encrypt the backup');
+      return;
+    }
+
+    // Encrypt the JSON
+    const encryptedData = CryptoJS.AES.encrypt(dataToExport, password).toString();
+    const fileName = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+    // Detect if running in Capacitor mobile
+    const isMobile = (window as any).Capacitor?.isNativePlatform?.();
+
+    if (isMobile) {
+      // Save to mobile filesystem (Documents or Downloads folder)
+      await Filesystem.writeFile({
+        path: fileName,
+        data: encryptedData,
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+      });
+      toast.success(`Encrypted backup saved as ${fileName}`);
+    } else {
+      // Browser fallback
+      const blob = new Blob([encryptedData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
-      toast.success('Data exported successfully');
-    } catch (error) {
-      toast.error('Failed to export data');
-      console.error('Export error:', error);
+      toast.success('Data exported successfully (encrypted)');
     }
-  };
+  } catch (err) {
+    console.error('Export error:', err);
+    toast.error('Failed to export data');
+  }
+};
+
+
 
   const getPasswordStrength = (password: string) => {
     let strength = 0;
