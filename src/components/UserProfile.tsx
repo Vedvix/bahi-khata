@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner@2.0.3';
 import { useTransactions } from './TransactionContext';
+import { Analytics } from './Analytics';
 // import { BackupService } from './BackupService';
 import { GoogleDriveBackupService } from './BackupService';
 import CryptoJS from 'crypto-js';
@@ -42,6 +43,8 @@ export function UserProfile() {
     autoBackup: true,
     backupFrequency: 'daily',
   });
+
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
 
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
@@ -536,7 +539,21 @@ const handleExportData = async () => {
           </Alert>
         </CardContent>
       </Card>
+      {/* Quick Analytics CTA */}
+        <div className="flex items-center justify-between gap-4 mt-4">
+          <div>
+            <p className="text-sm text-gray-600">Want a quick overview?</p>
+            <p className="text-xs text-muted-foreground">Open full analytics to explore charts & trends</p>
+          </div>
 
+          <Button
+            onClick={() => setIsAnalyticsOpen(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            View Analytics
+          </Button>
+        </div>
+           
       {/* Backup & Sync */}
       <Card>
         <CardHeader className="pb-3">
@@ -655,26 +672,47 @@ const handleExportData = async () => {
     {/* Logout Button */}
           <div className="space-y-2">
             <Button
-  variant="outline"
-  className="w-full text-red-700 border-red-300 hover:bg-red-50"
-  onClick={() => {
-    if (window.confirm("Are you sure you want to logout?")) {
-      try {
-        logoutFn(); // clears user & tokens
-        toast.success("Logged out successfully");
-        // no need to navigate; AuthGate will automatically render AuthPage
-      } catch (err) {
-        console.error("Logout failed", err);
-        toast.error("Failed to logout. Try again.");
-      }
-    }
-  }}
->
-  Logout
-</Button>
+              variant="outline"
+              className="w-full text-red-700 border-red-300 hover:bg-red-50"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to logout?")) {
+                  try {
+                    logoutFn(); // clears user & tokens
+                    toast.success("Logged out successfully");
+                    // no need to navigate; AuthGate will automatically render AuthPage
+                  } catch (err) {
+                    console.error("Logout failed", err);
+                    toast.error("Failed to logout. Try again.");
+                  }
+                }
+              }}
+            >
+              Logout
+            </Button>
           </div>
         </CardContent>
       </Card>
+
+      {/* Analytics Dialog — ~90% screen */}
+{isAnalyticsOpen && (
+  <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
+    {/* Top bar */}
+    <div className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-white">
+      <h3 className="text-lg font-semibold">Analytics</h3>
+      <Button variant="ghost" onClick={() => setIsAnalyticsOpen(false)}>
+        Close
+      </Button>
+    </div>
+
+    {/* Analytics content */}
+    <div className="flex-1 overflow-auto p-6">
+      <Analytics />
+    </div>
+  </div>
+)}
+
+
+
     </div>
   );
 }

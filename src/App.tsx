@@ -16,7 +16,7 @@ import { EMISubscriptions } from './components/EMISubscriptions';
 
 
 function MainAppShell() {
-  const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'subscriptions'|'investments'|'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'subscriptions'|'investments'|'analytics'|'profile'>('dashboard');
 
   const renderContent = () => {
     switch (activeTab) {
@@ -25,6 +25,7 @@ function MainAppShell() {
       case 'subscriptions' :return <EMISubscriptions />;
       //case 'subscriptions': return <Subscriptions />;
       case 'investments': return <InvestmentLending />;
+      case 'analytics': return <Analytics />;
       case 'profile': return <UserProfile />;
       default: return <Dashboard />;
     }
@@ -33,7 +34,18 @@ function MainAppShell() {
   return (
     <TransactionProvider>
       <div className="h-screen bg-gray-50 flex flex-col max-w-md mx-auto border-x border-gray-200">
-        <div className="flex-1 overflow-y-auto pb-20">{renderContent()}</div>
+        {/* <div className="flex-1 overflow-y-auto pb-20">{renderContent()}</div> */}
+        <div
+  style={{
+    flex: 1,
+    overflowY: 'auto',
+    paddingBottom: 'calc(90px + env(safe-area-inset-bottom, 0px))',
+  }}
+>
+  {renderContent()}
+</div>
+
+
         <BottomNavigation activeTab={activeTab} onTabChange={setActiveTab} />
         <Toaster />
       </div>

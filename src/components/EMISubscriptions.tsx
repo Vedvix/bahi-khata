@@ -438,61 +438,81 @@
 // }
 "use client";
 
+import React from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
 import { Subscriptions } from "./Subscriptions";
 import { Emi } from "./Emi";
+import { Calendar } from "lucide-react";
 
 export function EMISubscriptions() {
   return (
-    <Tabs defaultValue="subscriptions" style={{ width: "100%" }}>
-      {/* Tabs List */}
-      <TabsList
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          width: "100%",
-          backgroundColor: "white",
-          borderRadius: "1rem", // rounded-2xl
-          boxShadow: "0 1px 3px rgba(0,0,0,0.1)", // shadow-sm
-          border: "1px solid #f3f4f6", // border-gray-100
-          padding: "0.25rem", // p-1
-          marginBottom: "1.5rem", // mb-6
-        }}
-      >
-        {/* Subscriptions Tab */}
-        <TabsTrigger
-          value="subscriptions"
-          style={{
-            borderRadius: "0.75rem", // rounded-xl
-            padding: "0.5rem 0", // py-2
-          }}
-          className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg"
-        >
-          Subscriptions
-        </TabsTrigger>
+    <div className="min-h-full bg-white">
+      {/* Header Section */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-8 text-white">
+        <div className="flex items-center space-x-3">
+          <Calendar size={28} className="text-white" />
+          <div>
+            <h1 className="text-2xl font-semibold mb-1">Subscriptions & EMIs</h1>
+            <p className="text-indigo-100 text-sm">
+              Manage your subscriptions and EMI schedules in one place
+            </p>
+          </div>
+        </div>
+      </div>
 
-        {/* EMIs Tab */}
-        <TabsTrigger
-          value="emis"
-          style={{
-            borderRadius: "0.75rem", // rounded-xl
-            padding: "0.5rem 0", // py-2
-          }}
-          className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg"
-        >
-          EMIs
-        </TabsTrigger>
-      </TabsList>
+      {/* Tabs Section */}
+      <div className="px-6 -mt-4 pb-6">
+        <Tabs defaultValue="subscriptions" style={{ width: "100%" }}>
+          {/* Tabs List */}
+          <TabsList
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              width: "100%",
+              backgroundColor: "white",
+              borderRadius: "1rem", // rounded-2xl
+              boxShadow: "0 1px 3px rgba(0,0,0,0.1)", // shadow-sm
+              border: "1px solid #f3f4f6", // border-gray-100
+              padding: "0.25rem", // p-1
+              marginBottom: "1.5rem", // mb-6
+            }}
+          >
+            {/* Subscriptions Tab */}
+            <TabsTrigger
+              value="subscriptions"
+              style={{
+                borderRadius: "0.75rem", // rounded-xl
+                padding: "0.5rem 0", // py-2
+              }}
+              className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg"
+            >
+              Subscriptions
+            </TabsTrigger>
 
-      {/* Subscriptions Content */}
-      <TabsContent value="subscriptions">
-        <Subscriptions />
-      </TabsContent>
+            {/* EMIs Tab */}
+            <TabsTrigger
+              value="emis"
+              style={{
+                borderRadius: "0.75rem", // rounded-xl
+                padding: "0.5rem 0", // py-2
+              }}
+              className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-lg"
+            >
+              EMIs
+            </TabsTrigger>
+          </TabsList>
 
-      {/* EMIs Content */}
-      <TabsContent value="emis">
-        <Emi />
-      </TabsContent>
-    </Tabs>
+          {/* Subscriptions Content */}
+          <TabsContent value="subscriptions">
+            <Subscriptions />
+          </TabsContent>
+
+          {/* EMIs Content */}
+          <TabsContent value="emis">
+            <Emi />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
   );
 }

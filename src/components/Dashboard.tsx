@@ -16,21 +16,22 @@ export function Dashboard() {
     return transaction.type === 'income' ? acc + transaction.amount : acc - transaction.amount;
   }, 0);
   // Calculate total income
-const totalIncome = transactions
-  .filter(tx => tx.type === 'income')
-  .reduce((sum, tx) => sum + tx.amount, 0);
+  const totalIncome = transactions
+    .filter(tx => tx.type === 'income')
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  // Calculate total expenses
+  const totalExpense = transactions
+    .filter(tx => tx.type === 'expense' || tx.type === 'subscription' || tx.type === 'lend' || tx.type === 'investment')
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
-// Calculate total expenses
-const totalExpense = transactions
-  .filter(tx => tx.type === 'expense' || tx.type === 'subscription' || tx.type === 'lend' || tx.type === 'investment')
-  .reduce((sum, tx) => sum + tx.amount, 0);
+  const savedpercent = Math.round((totalIncome - totalExpense) / totalIncome * 100);
 
-  // Get recent transactions (last 5)
-const recentTransactions = transactions.slice(0, 5);
-//const displayedTransactions = showAllTransactions ? transactions : transactions.slice(0, 5);
-  // Get upcoming due dates (next 7 days)
-  const today = new Date();
-  const next7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    // Get recent transactions (last 5)
+  const recentTransactions = transactions.slice(0, 5);
+  //const displayedTransactions = showAllTransactions ? transactions : transactions.slice(0, 5);
+    // Get upcoming due dates (next 7 days)
+    const today = new Date();
+    const next7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
   
   const upcomingEMIs = emis.filter(emi => {
     const dueDate = new Date(emi.nextDueDate);
@@ -58,14 +59,14 @@ const recentTransactions = transactions.slice(0, 5);
     });
   };
 
-  if (showAll) {
-  return (
-    <AllTransactionsPage
-      transactions={transactions}
-      onBack={() => setShowAll(false)}
-    />
-  );
-}
+    if (showAll) {
+      return (
+        <AllTransactionsPage
+          transactions={transactions}
+          onBack={() => setShowAll(false)}
+        />
+      );
+    }
 
   return (
     <div className="min-h-full bg-white">
@@ -89,11 +90,25 @@ const recentTransactions = transactions.slice(0, 5);
               <p className="text-3xl text-white">{formatCurrency(currentBalance)}</p>
             </div>
             <div className="text-right">
-              <div className="flex items-center text-green-300 mb-1">
-                <TrendingUp size={16} className="mr-1" />
-                <span className="text-sm">+5.2%</span>
-              </div>
-              <p className="text-xs text-white/60">This month</p>
+              <div
+  style={{
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '0.25rem', // mb-1
+    color: totalExpense > totalIncome ? '#E62727' : '#67C090', // text-red-300 / text-green-300
+  }}
+>
+  {totalExpense > totalIncome ? (
+    <TrendingDown size={16} style={{ marginRight: '0.25rem' }} />
+  ) : (
+    <TrendingUp size={16} style={{ marginRight: '0.25rem' }} />
+  )}
+  <span style={{ fontSize: '0.875rem' }}>{Math.abs(savedpercent)}%</span>
+</div>
+<p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>
+  {totalExpense > totalIncome ? 'Overspent this month' : 'Saved this month'}
+</p>
+
             </div>
           </div>
         </div>

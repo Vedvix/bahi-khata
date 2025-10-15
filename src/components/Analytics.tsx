@@ -5,11 +5,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, Legend } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Target, PiggyBank, TrendingFlat } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Target, PiggyBank } from 'lucide-react';
 
 export function Analytics() {
-  const { transactions, categories } = useTransactions();
+  const { transactions, categories ,subscriptions} = useTransactions();
   const [selectedPeriod, setSelectedPeriod] = useState('thisMonth');
+  // add these right after: const [selectedPeriod, setSelectedPeriod] = useState('thisMonth');
+  const [spendingExpanded, setSpendingExpanded] = useState(false);
+  const [incomeExpanded, setIncomeExpanded] = useState(false);
+  const RECENT_COUNT = 5;
+
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -21,63 +26,149 @@ export function Analytics() {
   };
 
   // Filter transactions based on selected period
-  const getFilteredTransactions = () => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-    const startOfYear = new Date(now.getFullYear(), 0, 1);
+  // const getFilteredTransactions = () => {
+  //   const now = new Date();
+  //   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  //   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  //   const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  //   const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    return transactions.filter(transaction => {
-      const transactionDate = new Date(transaction.date);
-      switch (selectedPeriod) {
-        case 'thisMonth':
-          return transactionDate >= startOfMonth;
-        case 'lastMonth':
-          return transactionDate >= startOfLastMonth && transactionDate <= endOfLastMonth;
-        case 'thisYear':
-          return transactionDate >= startOfYear;
-        default:
-          return true;
-      }
-    });
-  };
+  //   return transactions.filter(transaction => {
+  //     const transactionDate = new Date(transaction.date);
+  //     switch (selectedPeriod) {
+  //       case 'thisMonth':
+  //         return transactionDate >= startOfMonth;
+  //       case 'lastMonth':
+  //         return transactionDate >= startOfLastMonth && transactionDate <= endOfLastMonth;
+  //       case 'thisYear':
+  //         return transactionDate >= startOfYear;
+  //       default:
+  //         return true;
+  //     }
+  //   });
+  // };
+  const getFilteredTransactions = (selectedType: string = 'all') => {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+  return transactions.filter(transaction => {
+    const transactionDate = new Date(transaction.date);
+
+    // Period filter
+    let periodMatch = false;
+    switch (selectedPeriod) {
+      case 'thisMonth':
+        periodMatch = transactionDate >= startOfMonth;
+        break;
+      case 'lastMonth':
+        periodMatch = transactionDate >= startOfLastMonth && transactionDate <= endOfLastMonth;
+        break;
+      case 'thisYear':
+        periodMatch = transactionDate >= startOfYear;
+        break;
+      default:
+        periodMatch = true;
+    }
+
+    if (!periodMatch) return false;
+
+    // Type filter
+    if (selectedType === 'all') return true;
+    if (selectedType === 'expense') return transaction.type === 'expense' || transaction.type === 'subscription';
+    if (selectedType === 'subscription') return transaction.type === 'subscription';
+    if (selectedType === 'lent') return transaction.type === 'lend';
+    if (selectedType === 'investment') return transaction.type === 'investment';
+
+    return transaction.type === selectedType;
+  });
+};
+
 
   const filteredTransactions = getFilteredTransactions();
 
   // Calculate spending by category
-  const spendingByCategory = categories
-    .filter(cat => cat.type === 'expense')
-    .map(category => {
-      const categoryTransactions = filteredTransactions.filter(
-        t => t.type === 'expense' && t.category === category.name
-      );
-      const total = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
-      return {
-        name: category.name,
-        value: total,
-        color: category.color,
-        icon: category.icon,
-      };
-    })
-    .filter(item => item.value > 0)
-    .sort((a, b) => b.value - a.value);
+  // const spendingByCategory = categories
+  //   .filter(cat => cat.type === 'expense')
+  //   .map(category => {
+  //     const categoryTransactions = filteredTransactions.filter(
+  //       t => (t.type === 'expense'||t.type === 'subscription' )&& t.category === category.name
+  //     );
+  //     const total = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
+  //     return {
+  //       name: category.name,
+  //       value: total,
+  //       color: category.color,
+  //       icon: category.icon,
+  //     };
+  //   })
+  //   .filter(item => item.value > 0)
+  //   .sort((a, b) => b.value - a.value);
+
+  // build map of expense-like transactions (expense + subscription)
+  const expenseTx = filteredTransactions.filter(t => t.type === 'expense' || t.type === 'subscription' || t.type === 'lend' || t.type === 'investment');
+
+  const map: Record<string, { name: string; value: number; color: string | undefined; icon?: string }> = {};
+  expenseTx.forEach(t => {
+    const name = t.category || 'Other';
+    if (!map[name]) map[name] = { name, value: 0, color: undefined, icon: undefined };
+    map[name].value += t.amount;
+  });
+
+  // attach color/icon from categories if exist
+  Object.values(map).forEach(item => {
+    const cat = categories.find(c => c.name === item.name);
+    if (cat) {
+      item.color = cat.color;
+      item.icon = cat.icon;
+    } else {
+      item.color = item.color ?? '#94a3b8'; // fallback color
+    }
+  });
+
+  const spendingByCategory = Object.values(map).filter(i => i.value > 0).sort((a,b) => b.value - a.value);
+
 
   // Calculate income by category
-  const incomeByCategory = categories
-    .filter(cat => cat.type === 'income')
-    .map(category => {
-      const categoryTransactions = filteredTransactions.filter(
-        t => t.type === 'income' && t.category === category.name
-      );
-      const total = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
-      return {
-        name: category.name,
-        value: total,
-        color: category.color,
-      };
-    })
-    .filter(item => item.value > 0);
+// const incomeByCategory = categories
+//   .filter(cat => cat.type === 'income')
+//   .map(category => {
+//     const categoryTransactions = filteredTransactions.filter(
+//       t => t.type === 'income' && t.category === category.name
+//     );
+//     const total = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
+//     return {
+//       name: category.name,
+//       value: total,
+//       color: category.color,
+//     };
+//   })
+//   .filter(item => item.value > 0);
+// group income transactions by category name (works even if category isn't in categories[])
+// group income transactions by category name (so Lend Repayment appears even if not in categories list)
+// group income transactions by category name (so Lend Repayment appears even if not in categories list)
+const incomeTx = filteredTransactions.filter(t => t.type === 'income');
+
+const incomeMap: Record<string, { name: string; value: number; color: string }> = {};
+incomeTx.forEach(t => {
+  const name = t.category || 'Other';
+  if (!incomeMap[name]) incomeMap[name] = { name, value: 0, color: '#94a3b8' };
+  const amt = typeof t.amount === 'number' ? t.amount : Number(t.amount || 0);
+  incomeMap[name].value += isNaN(amt) ? 0 : amt;
+});
+
+// attach colors from categories if present
+Object.values(incomeMap).forEach(item => {
+  const cat = categories.find(c => c.name === item.name && c.type === 'income');
+  if (cat) item.color = cat.color;
+});
+
+const incomeByCategory = Object.values(incomeMap).filter(i => i.value > 0).sort((a,b)=>b.value-a.value);
+
+
+
 
   // Calculate totals
   const totalIncome = filteredTransactions
@@ -85,9 +176,9 @@ export function Analytics() {
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalExpense = filteredTransactions
-    .filter(t => t.type === 'expense')
+    .filter(t => t.type === 'expense' || t.type === 'subscription' || t.type === 'lend' || t.type === 'investment')
     .reduce((sum, t) => sum + t.amount, 0);
-
+  
   const netSavings = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((netSavings / totalIncome) * 100) : 0;
 
@@ -313,25 +404,35 @@ export function Analytics() {
                     
                     {/* Category List */}
                     <div className="space-y-3">
-                      {spendingByCategory.map((category, index) => (
+                      {(spendingExpanded ? spendingByCategory : spendingByCategory.slice(0, RECENT_COUNT)).map((category, index) => (
                         <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                           <div className="flex items-center space-x-4">
-                            <div 
-                              className="w-4 h-4 rounded-full"
-                              style={{ backgroundColor: category.color }}
-                            />
+                            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: category.color }} />
                             <span className="text-xl">{category.icon}</span>
                             <span className="text-gray-900">{category.name}</span>
                           </div>
                           <div className="text-right">
                             <p className="text-gray-900">{formatCurrency(category.value)}</p>
                             <p className="text-sm text-gray-500">
-                              {((category.value / totalExpense) * 100).toFixed(1)}%
+                              {totalExpense > 0 ? ((category.value / totalExpense) * 100).toFixed(1) : 0}%
                             </p>
                           </div>
                         </div>
                       ))}
+
+                      {spendingByCategory.length > RECENT_COUNT && (
+                        <div className="pt-2 flex justify-center">
+                          <button
+                            onClick={() => setSpendingExpanded(prev => !prev)}
+                            aria-expanded={spendingExpanded}
+                            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm bg-gray-100 hover:bg-gray-200"
+                          >
+                            {spendingExpanded ? 'Show less' : `Show all (${spendingByCategory.length})`}
+                          </button>
+                        </div>
+                      )}
                     </div>
+
                   </>
                 ) : (
                   <p className="text-gray-500 text-center py-8">No expense data for this period</p>
@@ -340,7 +441,7 @@ export function Analytics() {
             </div>
 
             {/* Income Sources */}
-            {incomeByCategory.length > 0 && (
+            {/* {incomeByCategory.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
                 <div className="p-6">
                   <h3 className="text-lg text-gray-900 mb-4">Income Sources</h3>
@@ -365,7 +466,36 @@ export function Analytics() {
                   </div>
                 </div>
               </div>
-            )}
+            )} */}
+            <div className="space-y-3">
+              {(incomeExpanded ? incomeByCategory : incomeByCategory.slice(0, RECENT_COUNT)).map((category, index) => (
+                <div key={index} className="flex items-center justify-between p-4 bg-green-50 rounded-xl">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: category.color }} />
+                    <span className="text-gray-900">{category.name}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-green-600">{formatCurrency(category.value)}</p>
+                    <p className="text-sm text-gray-500">
+                      {totalIncome > 0 ? ((category.value / totalIncome) * 100).toFixed(1) : 0}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+
+              {incomeByCategory.length > RECENT_COUNT && (
+                <div className="pt-2 flex justify-center">
+                  <button
+                    onClick={() => setIncomeExpanded(prev => !prev)}
+                    aria-expanded={incomeExpanded}
+                    className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm bg-gray-100 hover:bg-gray-200"
+                  >
+                    {incomeExpanded ? 'Show less' : `Show all (${incomeByCategory.length})`}
+                  </button>
+                </div>
+              )}
+            </div>
+
           </TabsContent>
 
         {/* Investments Tab */}
