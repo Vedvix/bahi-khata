@@ -9,7 +9,7 @@ import {  addSubscription as addSubscriptionDB,
           getSubscriptions } from './services/subscriptions';
 import { addInvestmentDB, updateInvestmentDB, getInvestmentsDB } from './services/investments';
 import { addTransactionDB, getTransactionsDB } from './services/transactions';
-import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, getLendRecordsDB,
+import { addLendRecord as addLendRecordDB, updateLendRecord as updateLendRecordDB, getLendRecordsDB, prepayLendRecord,
         calculateRemainingWithInterest } from './services/lendmoney';
 import { addCategoryDB, getCategoriesDB, updateCategoryDB, deleteCategoryDB } from './services/categories';
 import { addPrepaymentDB, getPrepaymentsDB } from './services/prepayment';
@@ -549,56 +549,57 @@ const updateLendRecord = async (
     prev.map(lend => {
       if (lend.id !== id) return lend;
 
+      // Initialize with current values
       let newPaidAmount = lend.paidAmount;
       let newRemainingAmount = lend.remainingAmount;
       let newStatus = lend.status;
+      
+      const { prepaymentAmount, ...dbUpdate } = updates;
 
-      if (updates.prepaymentAmount && updates.prepaymentAmount > 0) {
-        const prepayAmount = updates.prepaymentAmount;
+      if (prepaymentAmount && prepaymentAmount > 0) {
+        // 🚨 CRITICAL FIX: Use the interest-aware service function!
+        // We call the asynchronous prepay function and let it handle the heavy lifting (interest calculation, principal allocation, and DB update).
+        
+        prepayLendRecord(lend, prepaymentAmount)
+          .then(updatedFields => {
+            // Update local state with the precise, calculated values from the service
+            setLendRecords(p => p.map(r => 
+              r.id === id 
+                ? { ...r, ...updatedFields } // Merge the calculated fields
+                : r
+            ));
+            
+            // 4️⃣ Add transaction for prepayment (This should be done *after* interest/principal split in a real app, but we'll use your current structure)
+            addTransaction({
+              user_id: lend.user_id,
+              type: 'income',
+              amount: prepaymentAmount, // Use the full amount for the transaction log
+              category: 'Lend Repayment',
+              description: `Prepayment from ${lend.borrowerName}`,
+              date: new Date().toISOString().split('T')[0],
+              time: new Date().toTimeString().slice(0, 5),
+            }).catch(err => console.error('Failed to add transaction:', err));
+          })
+          .catch(err => console.error('Prepayment failed:', err));
 
-        // 1️⃣ Update paid amount
-        newPaidAmount += prepayAmount;
-
-        // 2️⃣ Recalculate remaining amount (use lend.amount - newPaidAmount + interest)
-        newRemainingAmount = calculateRemainingWithInterest({
-          ...lend,
-          paidAmount: newPaidAmount,
-        });
-
-        // 3️⃣ Update status
-        newStatus = newRemainingAmount <= 0 ? 'fully_paid' : 'partially_paid';
-
-        // 4️⃣ Add transaction for prepayment
-        addTransaction({
-          user_id: lend.user_id,
-          type: 'income',
-          amount: prepayAmount,
-          category: 'Lend Repayment',
-          description: `Prepayment from ${lend.borrowerName}`,
-          date: new Date().toISOString().split('T')[0],
-          time: new Date().toTimeString().slice(0, 5),
-        }).catch(err => console.error('Failed to add transaction:', err));
+        // Since prepayLendRecord is async and handles the DB update, 
+        // we return the *original* record here and let the async setLendRecords above update the final state.
+        // THIS IS A TEMPORARY WORKAROUND FOR ASYNC CALLS IN SYNC MAP.
+        return lend; 
       }
 
-      // Prepare final update object for DB
-      const { prepaymentAmount, ...dbUpdate } = updates;
-      const finalUpdate = {
-        ...dbUpdate,
-        paidAmount: newPaidAmount,
-        remainingAmount: newRemainingAmount,
-        status: newStatus,
-      };
-
-      // Update in DB
-      updateLendRecordDB(Number(id), finalUpdate).catch(err =>
-        console.error('Failed to update DB:', err)
-      );
-
-      return { ...lend, ...finalUpdate };
+      // If this is a regular update (not a prepayment), handle it synchronously:
+      if (Object.keys(dbUpdate).length > 0) {
+        updateLendRecordDB(Number(id), dbUpdate).catch(err =>
+          console.error('Failed to update DB:', err)
+        );
+        return { ...lend, ...dbUpdate };
+      }
+      
+      return lend;
     })
   );
 };
-
 
 const addEMI = async (emi: Omit<EMI, 'id' | 'user_id'>) => {
   if (!user?.id) return;

@@ -1,5 +1,7 @@
-// //complete working code for localhost
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import { Capacitor } from '@capacitor/core'; 
 
+// We still need gapi for Drive API calls, and 'google' for the web fallback.
 declare const gapi: any;
 declare const google: any;
 
@@ -9,21 +11,27 @@ export interface BackupMetadata {
   fileName?: string;
   version?: string;
 }
+
 export class GoogleDriveBackupService {
   private static readonly CLIENT_ID = '213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com';
   private static readonly SCOPES = 'https://www.googleapis.com/auth/drive.file';
-  private static tokenClient: any;
+  
+  // State for web-only fallback logic
+  private static tokenClient: any; 
+  private static accessToken: string | null = null;
+  private static isInitialized = false;
 
-  /** Initialize gapi client and GSI token client */
+  /** Initialize gapi client for all platforms, and auth clients based on platform */
   static async initialize(): Promise<void> {
-    console.log('[BackupService] Initializing GAPI and Google Identity Services...');
+    if (this.isInitialized) return;
+
+    console.log('[BackupService] Initializing GAPI...');
+
     if (typeof gapi === 'undefined') {
       throw new Error('gapi not found. Add <script src="https://apis.google.com/js/api.js"></script> to index.html');
     }
-    if (typeof google === 'undefined') {
-      throw new Error('google identity services not found. Add <script src="https://accounts.google.com/gsi/client" async defer></script> to index.html');
-    }
 
+    // 1. Initialize gapi client (required for all API calls)
     await new Promise<void>((resolve, reject) => {
       gapi.load('client', async () => {
         try {
@@ -39,55 +47,103 @@ export class GoogleDriveBackupService {
       });
     });
 
-    this.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: this.CLIENT_ID,
-      scope: this.SCOPES,
-      callback: (tokenResponse: any) => {
-        console.log('[BackupService] OAuth token received', tokenResponse);
-      },
-    });
-    console.log('[BackupService] Token client initialized.');
+    // 2. Initialize GSI for Web platform ONLY
+    if (!Capacitor.isNative) { // <-- CORRECTED: Capacitor.isNative
+      console.log('[BackupService] Running on Web. Initializing GSI...');
+      if (typeof google === 'undefined') {
+         throw new Error('google identity services not found. Add <script src="https://accounts.google.com/gsi/client" async defer></script> to index.html');
+      }
+
+      this.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: this.CLIENT_ID,
+        scope: this.SCOPES,
+        callback: (tokenResponse: any) => {
+          console.log('[BackupService] Web OAuth token received (via init)');
+        },
+      });
+      console.log('[BackupService] Web Token client initialized.');
+    } else {
+        // 3. Initialize Capacitor GoogleAuth for native
+        console.log('[BackupService] Running on Native. Initializing Capacitor GoogleAuth...');
+        // Note: Initializing the plugin here is generally recommended.
+        GoogleAuth.initialize({
+            clientId: this.CLIENT_ID, // Still your Web Client ID
+            scopes: [this.SCOPES] 
+        });
+    }
+
+    this.isInitialized = true;
   }
 
-  /** Request access token via GSI */
-private static accessToken: string | null = null;
+  /** Request access token based on platform */
+  static async authenticate(): Promise<string> {
+    if (this.accessToken) return this.accessToken;
 
-static async authenticate(): Promise<string> {
-  if (this.accessToken) return this.accessToken;
+    await this.initialize(); // Ensure initialization is done
 
-  if (!this.tokenClient) throw new Error('Token client not initialized');
-
-  return new Promise((resolve, reject) => {
-    this.tokenClient.callback = (tokenResponse: any) => {
-      if (tokenResponse.error) reject(tokenResponse);
-      else {
-        this.accessToken = tokenResponse.access_token;
-        resolve(this.accessToken);
+    if (Capacitor.isNative) { // <-- CORRECTED: Capacitor.isNative
+      // --- NATIVE (CAPACITOR) AUTHENTICATION ---
+      console.log('[BackupService] Native auth flow via Capacitor GoogleAuth...');
+      try {
+        // Scopes can be passed again here, but are already set in initialize
+        const result = await GoogleAuth.signIn(); 
+        
+        if (result.authentication && result.authentication.accessToken) {
+          this.accessToken = result.authentication.accessToken;
+          // Set the token for gapi to use it for all subsequent Drive API calls
+          gapi.client.setToken({ access_token: this.accessToken });
+          console.log('[BackupService] Access Token acquired from native plugin.');
+          return this.accessToken;
+        } else {
+          throw new Error('Failed to get access token from Capacitor GoogleAuth plugin.');
+        }
+      } catch (e) {
+        console.error('[BackupService] Native Google Sign-In failed:', e);
+        throw new Error('Authentication failed in native environment.');
       }
-    };
-    this.tokenClient.requestAccessToken({ prompt: 'consent' });
-  });
-}
+    } else {
+      // --- WEB (LOCALHOST) AUTHENTICATION ---
+      console.log('[BackupService] Web auth flow via GSI token client...');
+      
+      if (!this.tokenClient) throw new Error('Web Token client not initialized');
 
+      return new Promise((resolve, reject) => {
+        this.tokenClient.callback = (tokenResponse: any) => {
+          if (tokenResponse.error) {
+             console.error('[BackupService] Web GSI error:', tokenResponse);
+             reject(tokenResponse);
+          } else {
+            const token = tokenResponse.access_token; // <--- Extract token locally
+            this.accessToken = token; // Update the global cache
+            // Set the token for gapi to use it for all subsequent Drive API calls
+            gapi.client.setToken({ access_token: token }); // Use the local string
+            resolve(token); // <--- Resolve with the guaranteed string
+          }
+        };
+        this.tokenClient.requestAccessToken({ prompt: 'consent' });
+      });
+    }
+  }
 
   /** Get or create backup folder */
   private static async getOrCreateBackupFolder(): Promise<string> {
     const folderName = 'FinTrack Backups';
     console.log(`[BackupService] Checking if folder "${folderName}" exists...`);
+    
     const listResp = await gapi.client.drive.files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`,
-      fields: 'files(id, name)',
+        q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`,
+        fields: 'files(id, name)',
     });
 
     if (listResp.result.files && listResp.result.files.length > 0) {
-      console.log('[BackupService] Folder exists, ID:', listResp.result.files[0].id);
-      return listResp.result.files[0].id;
+        console.log('[BackupService] Folder exists, ID:', listResp.result.files[0].id);
+        return listResp.result.files[0].id;
     }
 
     console.log('[BackupService] Folder not found, creating folder...');
     const createResp = await gapi.client.drive.files.create({
-      resource: { name: folderName, mimeType: 'application/vnd.google-apps.folder' },
-      fields: 'id',
+        resource: { name: folderName, mimeType: 'application/vnd.google-apps.folder' },
+        fields: 'id',
     });
 
     console.log('[BackupService] Folder created with ID:', createResp.result.id);
@@ -97,7 +153,7 @@ static async authenticate(): Promise<string> {
   /** Upload JSON/text file to Drive */
   static async uploadFile(fileName: string, content: string): Promise<BackupMetadata> {
     console.log(`[BackupService] Uploading file "${fileName}"...`);
-    await this.authenticate();
+    await this.authenticate(); // Ensures token is set
     const parentId = await this.getOrCreateBackupFolder();
 
     const boundary = '-------314159265358979323846';
@@ -160,8 +216,6 @@ static async authenticate(): Promise<string> {
     return resp.body || JSON.stringify(resp.result) || '';
   }
 }
-
-
 // // GoogleDriveBackupService.ts
 // import { gapi } from 'gapi-script';
 // import{ GoogleAuth } from '@codetrix-studio/capacitor-google-auth';

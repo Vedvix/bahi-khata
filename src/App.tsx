@@ -13,11 +13,11 @@ import { Analytics } from './components/Analytics';
 import { UserProfile } from './components/UserProfile';
 import { BottomNavigation } from './components/BottomNavigation';
 import { EMISubscriptions } from './components/EMISubscriptions';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 
 function MainAppShell() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'transactions'|'subscriptions'|'subscriptions'|'investments'|'analytics'|'profile'>('dashboard');
-
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
@@ -54,10 +54,13 @@ function MainAppShell() {
 }
 
 export default function App() {
+  const GOOGLE_CLIENT_ID ='213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com';
   return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
     <AuthProvider>
       <AuthGate />
     </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }
 

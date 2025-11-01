@@ -9,14 +9,14 @@ interface AllTransactionsPageProps {
 }
 
 export function AllTransactionsPage({ transactions, onBack }: AllTransactionsPageProps) {
-  const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "investment" | "lent" | "subscription">("all");
+  const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "investment" | "lent" | "subscription" | "emi">("all");
   const [sortOption, setSortOption] = useState<"dateDesc" | "dateAsc" | "amountDesc" | "amountAsc" | "custom">("dateDesc");
   const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({});
 
   // Filtering
   let filteredTransactions = transactions.filter(tx => {
     if (filterType === "all") return true;
-    if (filterType === "expense") return tx.type === "expense" || tx.type === "subscription";
+    if (filterType === "expense") return tx.type === "expense" || tx.type === "subscription" || tx.type === "emi";
     if (filterType === "subscription") return tx.type === "subscription";
     if (filterType === "lent") return tx.type === "lend";
     if (filterType === "investment") return tx.type === "investment";

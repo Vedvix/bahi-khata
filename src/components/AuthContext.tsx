@@ -6,7 +6,7 @@ import {
   changePassword,
   refreshToken,
 } from "../auth/auth-direct";
-
+import { loginWithGoogle } from "../auth/auth-direct";
 type User = { id: string; email: string; name: string, phone: number } | null;
 
 interface AuthContextType {
@@ -16,6 +16,7 @@ interface AuthContextType {
   signupFn: (email: string, password: string, name: string) => Promise<void>;
   loginFn: (email: string, password: string) => Promise<void>;
   logoutFn: () => void;
+  googleLoginFn: (credential: string) => Promise<void>;
 
 }
 
@@ -98,6 +99,22 @@ const logoutFn = () => {
   console.log("User logged out successfully");
 };
 
+const googleLoginFn = async (credential: string) => {
+    // Call a new backend function to exchange the credential for your app's tokens
+    const res = await loginWithGoogle(credential); 
+
+    if (!res.user || !res.accessToken) {
+      throw new Error("Google Sign-In failed on server");
+    }
+
+    // Save tokens and user info, just like in loginFn
+    setUser(res.user);
+    setAccessToken(res.accessToken);
+    setRefreshTk(res.refreshToken);
+    localStorage.setItem("user", JSON.stringify(res.user));
+    localStorage.setItem("accessToken", res.accessToken);
+    localStorage.setItem("refreshToken", res.refreshToken);
+  };
 
   return (
     <AuthContext.Provider
@@ -107,7 +124,8 @@ const logoutFn = () => {
         refreshToken: refreshTk,
         signupFn,
         loginFn,
-        logoutFn
+        logoutFn,
+        googleLoginFn
 
     }}
     >
