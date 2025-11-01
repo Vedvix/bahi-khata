@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, Settings, Lock, Shield, Download, Upload, Cloud, Smartphone, Eye, EyeOff, Check, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -16,6 +16,8 @@ import { Analytics } from './Analytics';
 import { GoogleDriveBackupService } from './BackupService';
 import CryptoJS from 'crypto-js';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 import { gapi } from 'gapi-script';
 
 import { changePassword, updateUserInfo, logout } from '../auth/auth-direct';
@@ -113,36 +115,6 @@ const handleUpdateInfo = async () => {
     console.error('Update info error:', err);
   }
 };
-
-  // const handleBackupToCloud = async () => {
-  //   setIsBackupInProgress(true);
-    
-  //   try {
-  //     // Authenticate with Google Drive
-  //     await BackupService.authenticate();
-      
-  //     // Export current data
-  //     const dataToBackup = exportData();
-      
-  //     // Upload to Google Drive
-  //     const metadata = await BackupService.backupToGoogleDrive(dataToBackup);
-      
-  //     setUserData(prev => ({
-  //       ...prev,
-  //       lastBackup: metadata.timestamp
-  //     }));
-      
-  //     toast.success('Data backed up to Google Drive successfully');
-  //   } catch (error) {
-  //     toast.error('Backup failed. Please try again.');
-  //     console.error('Backup error:', error);
-  //   } finally {
-  //     setIsBackupInProgress(false);
-  //   }
-  // };
-
-// add this import at top of the file if not already present:
-// import { GoogleDriveBackupService } from './GoogleDriveBackupService';
 
 const handleBackupToCloud = async () => {
   setIsBackupInProgress(true);
@@ -246,76 +218,88 @@ const handleBackupToCloud = async () => {
 };
 
 
-  // const handleExportData = () => {
-  //   try {
-  //     const dataToExport = exportData();
-  //     const blob = new Blob([dataToExport], { type: 'application/json' });
-  //     const url = URL.createObjectURL(blob);
-  //     const a = document.createElement('a');
-  //     a.href = url;
-  //     a.download = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
-  //     document.body.appendChild(a);
-  //     a.click();
-  //     document.body.removeChild(a);
-  //     URL.revokeObjectURL(url);
-      
-  //     toast.success('Data exported successfully');
-  //   } catch (error) {
-  //     toast.error('Failed to export data');
-  //     console.error('Export error:', error);
-  //   }
-  // };
-const handleExportData = async () => {
-  try {
-    const dataToExport = exportData(); // call your context's exportData
-    if (!dataToExport) {
-      toast.error('No data to export');
-      return;
-    }
+const [status, setStatus] = useState('Ready to export data.');
 
-    // Ask user for password
-    const password = prompt('Enter a password to encrypt this backup:');
-    if (!password) {
-      toast.error('Password is required to encrypt the backup');
-      return;
-    }
+    const handleExportData = useCallback(async () => {
+        setStatus('Processing export...');
+        
+        try {
+            const dataToExport = exportData();
+            if (!dataToExport) {
+                toast.error('No data to export');
+                setStatus('Export failed: No data.');
+                return;
+            }
 
-    // Encrypt the JSON
-    const encryptedData = CryptoJS.AES.encrypt(dataToExport, password).toString();
-    const fileName = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
+            const password = prompt('Enter a password to encrypt this backup:');
+            if (!password) {
+                toast.error('Password is required to encrypt the backup');
+                setStatus('Export cancelled.');
+                return;
+            }
 
-    // Detect if running in Capacitor mobile
-    const isMobile = (window as any).Capacitor?.isNativePlatform?.();
+            const encryptedData = CryptoJS.AES.encrypt(dataToExport, password).toString();
+            const date = new Date().toISOString().split('T')[0];
+            const fileName = `fintrack-backup-${date}.json`;
+            const isNative = Capacitor.getPlatform() !== 'web';
 
-    if (isMobile) {
-      // Save to mobile filesystem (Documents or Downloads folder)
-      await Filesystem.writeFile({
-        path: fileName,
-        data: encryptedData,
-        directory: Directory.Documents,
-        encoding: Encoding.UTF8,
-      });
-      toast.success(`Encrypted backup saved as ${fileName}`);
-    } else {
-      // Browser fallback
-      const blob = new Blob([encryptedData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('Data exported successfully (encrypted)');
-    }
-  } catch (err) {
-    console.error('Export error:', err);
-    toast.error('Failed to export data');
-  }
-};
+            if (isNative) {
+                // --- NATIVE EXPORT STRATEGY: Write to Cache, then Share ---
 
+                // 1. Write the file to the app's temporary, guaranteed-writable CACHE directory.
+                // This location is easy to write to and is designed for temporary files like share payloads.
+                await Filesystem.writeFile({
+                    path: fileName,
+                    data: encryptedData,
+                    directory: Directory.Cache, 
+                    encoding: Encoding.UTF8,
+                });
+                toast.success(`Encrypted backup file created temporarily in app cache: ${fileName}`);
 
+                // 2. Get the file URI from the Cache directory.
+                const uriResult = await Filesystem.getUri({
+                    directory: Directory.Cache,
+                    path: fileName,
+                });
+                
+                // 3. Share the file. This prompts the user to select a target.
+                // The user MUST choose a saving app (like "Files" or "Drive") to move it to a permanent location.
+                await Share.share({
+                    title: 'FinTrack Encrypted Backup',
+                    text: 'FinTrack Data Backup (Encrypted)',
+                    files: [uriResult.uri], 
+                    dialogTitle: 'Select "Files" or "Drive" to save your backup externally',
+                });
+                
+                // Cleanup: Delete the temporary file from cache after sharing
+                await Filesystem.deleteFile({
+                    path: fileName,
+                    directory: Directory.Cache,
+                });
+
+                toast.success('Backup file shared successfully. Please choose a save location.');
+                setStatus('Export successful: Shared via native sheet.');
+
+            } else {
+                // --- WEB EXPORT STRATEGY ---
+                const blob = new Blob([encryptedData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.success('Data exported successfully (encrypted)');
+                setStatus('Export successful: Downloaded to browser.');
+            }
+        } catch (err) {
+            console.error('Export error:', err);
+            toast.error(err.message || 'Failed to export data');
+            setStatus(`Export failed: ${err.message}`);
+        }
+    }, []);
 
   const getPasswordStrength = (password: string) => {
     let strength = 0;
