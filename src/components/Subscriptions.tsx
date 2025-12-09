@@ -9,6 +9,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
 import { useTransactions, Subscription } from './TransactionContext';
+import { useAuth } from './AuthContext';
 
 const subscriptionCategories = [
   { name: 'Entertainment', icon: Tv, color: '#EC4899' },
@@ -37,8 +38,27 @@ const popularSubscriptions = [
 ];
 
 export function Subscriptions() {
-  const { subscriptions, addSubscription } = useTransactions();
+  const { subscriptions, addSubscription, addTransaction, updateSubscription } = useTransactions();
+  const { user } = useAuth(); 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  React.useEffect(() => {
+    if (!user?.id) return;
+
+    const checkAutoPay = async () => {
+      const today = new Date().toISOString().split("T")[0];
+
+      subscriptions.forEach(sub => {
+        if (sub.autoPayEnabled && new Date(sub.nextDueDate) <= new Date(today)) {
+          console.log(`🔄 Auto-paying: ${sub.name}`);
+          processSubscriptionPayment(sub);
+        }
+      });
+    };
+
+    checkAutoPay();
+    }, [user?.id, subscriptions]);
+
+  
   const [formData, setFormData] = useState({
     name: '',
     amount: '',
@@ -72,6 +92,39 @@ export function Subscriptions() {
     setIsAddDialogOpen(false);
   };
 
+const processSubscriptionPayment = (subscription: Subscription) => {
+  if (!user?.id) return;
+
+  const today = new Date();
+  const timeString = today.toLocaleTimeString('en-IN', { hour12: false });
+
+  addTransaction({
+    type: 'subscription',
+    amount: subscription.amount,
+    category: subscription.category,
+    description: `Paid ${subscription.name} subscription`,
+    date: today.toISOString().split('T')[0],
+    time: timeString,
+    user_id: user.id,
+  });
+
+  // Calculate next due date
+  let nextDue = new Date(subscription.nextDueDate);
+  if (subscription.frequency === 'monthly') nextDue.setMonth(nextDue.getMonth() + 1);
+  if (subscription.frequency === 'quarterly') nextDue.setMonth(nextDue.getMonth() + 3);
+  if (subscription.frequency === 'yearly') nextDue.setFullYear(nextDue.getFullYear() + 1);
+
+  updateSubscription(subscription.id, {
+    nextDueDate: nextDue.toISOString().split('T')[0],
+  });
+};
+
+
+const handleMarkPaid = (subscription: Subscription) => {
+  processSubscriptionPayment(subscription);
+};
+
+
   const selectPopularSubscription = (subscription: typeof popularSubscriptions[0]) => {
     const nextMonth = new Date();
     nextMonth.setMonth(nextMonth.getMonth() + 1);
@@ -103,6 +156,14 @@ export function Subscriptions() {
       return dueDate <= nextWeek && dueDate >= today;
     });
   };
+
+  const getOverdueSubscriptions = () => {
+    const today = new Date();
+    return subscriptions.filter(sub => new Date(sub.nextDueDate) < today);
+  };
+
+  const overdueSubscriptions = getOverdueSubscriptions();
+
 
   const getCategoryIcon = (category: string) => {
     const cat = subscriptionCategories.find(c => c.name === category);
@@ -195,7 +256,7 @@ export function Subscriptions() {
 
               <div className="space-y-2">
                 <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData(prev => ({...prev, category: value}))}>
+                <Select value={formData.category} onValueChange={(value:any) => setFormData(prev => ({...prev, category: value}))}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
@@ -227,7 +288,7 @@ export function Subscriptions() {
                 <Switch
                   id="autopay"
                   checked={formData.autoPayEnabled}
-                  onCheckedChange={(checked) => setFormData(prev => ({...prev, autoPayEnabled: checked}))}
+                  onCheckedChange={(checked:any) => setFormData(prev => ({...prev, autoPayEnabled: checked}))}
                 />
                 <Label htmlFor="autopay">Enable UPI AutoPay</Label>
               </div>
@@ -259,6 +320,41 @@ export function Subscriptions() {
           </CardContent>
         </Card>
       </div>
+      {/* Overdue Subscriptions */}
+      {overdueSubscriptions.length > 0 && (
+        <Card className="border-red-300">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-red-600">
+              <Calendar className="w-4 h-4" />
+              Overdue Subscriptions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {overdueSubscriptions.map((sub) => {
+              const Icon = getCategoryIcon(sub.category);
+              return (
+                <div key={sub.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div 
+                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{backgroundColor: getCategoryColor(sub.category) + '20'}}
+                    >
+                      <Icon className="w-4 h-4" style={{color: getCategoryColor(sub.category)}} />
+                    </div>
+                    <div>
+                      <p className="text-sm">{sub.name}</p>
+                      <p className="text-xs text-red-500">Due: {new Date(sub.nextDueDate).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => handleMarkPaid(sub)}>
+                    Mark Paid
+                  </Button>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Upcoming Payments */}
       {upcomingSubscriptions.length > 0 && (

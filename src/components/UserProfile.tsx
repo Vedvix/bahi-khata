@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, Settings, Lock, Shield, Download, Upload, Cloud, Smartphone, Eye, EyeOff, Check, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -11,7 +11,17 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner@2.0.3';
 import { useTransactions } from './TransactionContext';
-import { BackupService } from './BackupService';
+import { Analytics } from './Analytics';
+// import { BackupService } from './BackupService';
+import { GoogleDriveBackupService } from './BackupService';
+import CryptoJS from 'crypto-js';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
+import { gapi } from 'gapi-script';
+
+import { changePassword, updateUserInfo, logout } from '../auth/auth-direct';
+import { useAuth } from './AuthContext';
 
 interface UserData {
   name: string;
@@ -24,16 +34,19 @@ interface UserData {
 }
 
 export function UserProfile() {
+  const {logoutFn, user } = useAuth();
   const { exportData, importData, clearAllData } = useTransactions();
-  const [userData, setUserData] = useState<UserData>({
-    name: 'Rajesh Kumar',
-    email: 'rajesh.kumar@email.com',
-    phone: '+91 98765 43210',
-    currency: 'INR',
-    lastBackup: '2024-12-25T10:30:00Z',
+  const [userData, setUserData] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    currency: user?.currency || 'INR',
+    lastBackup: '', // can fetch last backup if stored
     autoBackup: true,
-    backupFrequency: 'daily'
+    backupFrequency: 'daily',
   });
+
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
 
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
@@ -47,99 +60,246 @@ export function UserProfile() {
     confirm: false
   });
   const [isBackupInProgress, setIsBackupInProgress] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        await GoogleDriveBackupService.initialize();
+        console.log('Google Drive initialized');
+      } catch (err) {
+        console.error('Drive init failed', err);
+        toast.error('Failed to initialize Google Drive. Check console.');
+      }
+    })();
+  }, []);
 
-  const handlePasswordChange = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      toast.error('New passwords do not match');
+const handlePasswordChange = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    toast.error('New passwords do not match');
+    return;
+  }
+
+  if (passwordForm.newPassword.length < 8) {
+    toast.error('Password must be at least 8 characters long');
+    return;
+  }
+
+  try {
+    // You need user ID, assume it's stored in localStorage
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const res = await changePassword(user.id, passwordForm.currentPassword, passwordForm.newPassword);
+
+    toast.success(res.message || 'Password updated successfully');
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setIsPasswordDialogOpen(false);
+  } catch (err: any) {
+    toast.error(err.error || err.message || 'Failed to change password');
+    console.error('Change password error:', err);
+  }
+};
+
+const handleUpdateInfo = async () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const res = await updateUserInfo(user.id, {
+      name: userData.name,
+      email: userData.email,
+      phone: userData.phone
+    });
+    setUserData(prev => ({ ...prev, ...res.user }));
+    localStorage.setItem('me', JSON.stringify(res.user));
+    toast.success(res.message || 'User info updated successfully');
+  } catch (err: any) {
+    toast.error(err.error || err.message || 'Failed to update user info');
+    console.error('Update info error:', err);
+  }
+};
+
+const handleBackupToCloud = async () => {
+  setIsBackupInProgress(true);
+
+  try {
+    const password = prompt('Enter a password to encrypt this backup (remember this password to restore):');
+    if (!password) {
+      toast.error('Backup cancelled — password is required.');
       return;
     }
-    
-    if (passwordForm.newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters long');
+
+    const dataToBackup = exportData();
+    if (!dataToBackup) {
+      toast.error('No data to backup.');
       return;
     }
 
-    // Simulate password change
-    setTimeout(() => {
-      toast.success('Password updated successfully');
-      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setIsPasswordDialogOpen(false);
-    }, 1000);
-  };
+    const encrypted = CryptoJS.AES.encrypt(dataToBackup, password).toString();
 
-  const handleBackupToCloud = async () => {
-    setIsBackupInProgress(true);
-    
-    try {
-      // Authenticate with Google Drive
-      await BackupService.authenticate();
-      
-      // Export current data
-      const dataToBackup = exportData();
-      
-      // Upload to Google Drive
-      const metadata = await BackupService.backupToGoogleDrive(dataToBackup);
-      
-      setUserData(prev => ({
-        ...prev,
-        lastBackup: metadata.timestamp
-      }));
-      
-      toast.success('Data backed up to Google Drive successfully');
-    } catch (error) {
-      toast.error('Backup failed. Please try again.');
-      console.error('Backup error:', error);
-    } finally {
-      setIsBackupInProgress(false);
+    // Authenticate and get access token
+    const accessToken = await GoogleDriveBackupService.authenticate();
+    gapi.client.setToken({ access_token: accessToken });
+
+    const timestamp = new Date().toISOString();
+    const fileName = `fintrack-backup-${timestamp}.json.enc`;
+    const meta = await GoogleDriveBackupService.uploadFile(fileName, encrypted);
+
+    setUserData(prev => ({
+      ...prev,
+      lastBackup: meta.timestamp || timestamp
+    }));
+
+    toast.success('Data backed up to Google Drive successfully');
+  } catch (err: any) {
+    console.error('Backup error:', err);
+    if (err?.error === 'popup_closed_by_user') {
+      toast.error('Authentication was cancelled. Backup aborted.');
+    } else {
+      toast.error(err.message || 'Backup failed. Please try again.');
     }
-  };
+  } finally {
+    setIsBackupInProgress(false);
+  }
+};
 
+
+
+  // const handleImportData = () => {
+  //   const input = document.createElement('input');
+  //   input.type = 'file';
+  //   input.accept = '.json';
+  //   input.onchange = (e) => {
+  //     const file = (e.target as HTMLInputElement).files?.[0];
+  //     if (file) {
+  //       const reader = new FileReader();
+  //       reader.onload = (event) => {
+  //         const content = event.target?.result as string;
+  //         if (content) {
+  //           const success = importData(content);
+  //           if (success) {
+  //             toast.success(`Data imported from ${file.name} successfully`);
+  //           } else {
+  //             toast.error('Failed to import data. Please check the file format.');
+  //           }
+  //         }
+  //       };
+  //       reader.readAsText(file);
+  //     }
+  //   };
+  //   input.click();
+  // };
   const handleImportData = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const content = event.target?.result as string;
-          if (content) {
-            const success = importData(content);
-            if (success) {
-              toast.success(`Data imported from ${file.name} successfully`);
-            } else {
-              toast.error('Failed to import data. Please check the file format.');
-            }
-          }
-        };
-        reader.readAsText(file);
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    const password = prompt('Enter the password to decrypt this backup:');
+    if (!password) {
+      toast.error('Password is required for decryption');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const success = importData(content, password); // pass password
+        if (success) {
+          toast.success(`Data imported from ${file.name} successfully`);
+        } else {
+          toast.error('Failed to import data. Check password or file.');
+        }
       }
     };
-    input.click();
+    reader.readAsText(file);
   };
+  input.click();
+};
 
-  const handleExportData = () => {
-    try {
-      const dataToExport = exportData();
-      const blob = new Blob([dataToExport], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fintrack-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      toast.success('Data exported successfully');
-    } catch (error) {
-      toast.error('Failed to export data');
-      console.error('Export error:', error);
-    }
-  };
+
+const [status, setStatus] = useState('Ready to export data.');
+
+    const handleExportData = useCallback(async () => {
+        setStatus('Processing export...');
+        
+        try {
+            const dataToExport = exportData();
+            if (!dataToExport) {
+                toast.error('No data to export');
+                setStatus('Export failed: No data.');
+                return;
+            }
+
+            const password = prompt('Enter a password to encrypt this backup:');
+            if (!password) {
+                toast.error('Password is required to encrypt the backup');
+                setStatus('Export cancelled.');
+                return;
+            }
+
+            const encryptedData = CryptoJS.AES.encrypt(dataToExport, password).toString();
+            const date = new Date().toISOString().split('T')[0];
+            const fileName = `fintrack-backup-${date}.json`;
+            const isNative = Capacitor.getPlatform() !== 'web';
+
+            if (isNative) {
+                // --- NATIVE EXPORT STRATEGY: Write to Cache, then Share ---
+
+                // 1. Write the file to the app's temporary, guaranteed-writable CACHE directory.
+                // This location is easy to write to and is designed for temporary files like share payloads.
+                await Filesystem.writeFile({
+                    path: fileName,
+                    data: encryptedData,
+                    directory: Directory.Cache, 
+                    encoding: Encoding.UTF8,
+                });
+                toast.success(`Encrypted backup file created temporarily in app cache: ${fileName}`);
+
+                // 2. Get the file URI from the Cache directory.
+                const uriResult = await Filesystem.getUri({
+                    directory: Directory.Cache,
+                    path: fileName,
+                });
+                
+                // 3. Share the file. This prompts the user to select a target.
+                // The user MUST choose a saving app (like "Files" or "Drive") to move it to a permanent location.
+                await Share.share({
+                    title: 'FinTrack Encrypted Backup',
+                    text: 'FinTrack Data Backup (Encrypted)',
+                    files: [uriResult.uri], 
+                    dialogTitle: 'Select "Files" or "Drive" to save your backup externally',
+                });
+                
+                // Cleanup: Delete the temporary file from cache after sharing
+                await Filesystem.deleteFile({
+                    path: fileName,
+                    directory: Directory.Cache,
+                });
+
+                toast.success('Backup file shared successfully. Please choose a save location.');
+                setStatus('Export successful: Shared via native sheet.');
+
+            } else {
+                // --- WEB EXPORT STRATEGY ---
+                const blob = new Blob([encryptedData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.success('Data exported successfully (encrypted)');
+                setStatus('Export successful: Downloaded to browser.');
+            }
+        } catch (err) {
+            console.error('Export error:', err);
+            toast.error(err.message || 'Failed to export data');
+            setStatus(`Export failed: ${err.message}`);
+        }
+    }, []);
 
   const getPasswordStrength = (password: string) => {
     let strength = 0;
@@ -205,9 +365,14 @@ export function UserProfile() {
               />
             </div>
           </div>
-          <Button size="sm" className="w-full">
+          <Button
+            size="sm"
+            className="w-full"
+            onClick={handleUpdateInfo}
+          >
             Update Information
           </Button>
+
         </CardContent>
       </Card>
 
@@ -358,7 +523,21 @@ export function UserProfile() {
           </Alert>
         </CardContent>
       </Card>
+      {/* Quick Analytics CTA */}
+        <div className="flex items-center justify-between gap-4 mt-4">
+          <div>
+            <p className="text-sm text-gray-600">Want a quick overview?</p>
+            <p className="text-xs text-muted-foreground">Open full analytics to explore charts & trends</p>
+          </div>
 
+          <Button
+            onClick={() => setIsAnalyticsOpen(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            View Analytics
+          </Button>
+        </div>
+           
       {/* Backup & Sync */}
       <Card>
         <CardHeader className="pb-3">
@@ -377,7 +556,7 @@ export function UserProfile() {
             </div>
             <Switch
               checked={userData.autoBackup}
-              onCheckedChange={(checked) => setUserData(prev => ({...prev, autoBackup: checked}))}
+              onCheckedChange={(checked: any) => setUserData(prev => ({...prev, autoBackup: checked}))}
             />
           </div>
 
@@ -471,8 +650,53 @@ export function UserProfile() {
               This will remove all data from your device. Make sure you have a backup.
             </p>
           </div>
+
+          <Separator />
+
+    {/* Logout Button */}
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full text-red-700 border-red-300 hover:bg-red-50"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to logout?")) {
+                  try {
+                    logoutFn(); // clears user & tokens
+                    toast.success("Logged out successfully");
+                    // no need to navigate; AuthGate will automatically render AuthPage
+                  } catch (err) {
+                    console.error("Logout failed", err);
+                    toast.error("Failed to logout. Try again.");
+                  }
+                }
+              }}
+            >
+              Logout
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Analytics Dialog — ~90% screen */}
+{isAnalyticsOpen && (
+  <div className="fixed inset-0 z-50 flex flex-col bg-gray-50">
+    {/* Top bar */}
+    <div className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 text-white">
+      <h3 className="text-lg font-semibold">Analytics</h3>
+      <Button variant="ghost" onClick={() => setIsAnalyticsOpen(false)}>
+        Close
+      </Button>
+    </div>
+
+    {/* Analytics content */}
+    <div className="flex-1 overflow-auto p-6">
+      <Analytics />
+    </div>
+  </div>
+)}
+
+
+
     </div>
   );
 }

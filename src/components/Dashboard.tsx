@@ -1,23 +1,37 @@
 import React from 'react';
 import { useTransactions } from './TransactionContext';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { TrendingUp, TrendingDown, Calendar, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Calendar, AlertCircle, X } from 'lucide-react';
+import AllTransactionsPage from "./AllTransactionsPage";
+
 
 export function Dashboard() {
   const { transactions, investments, lendRecords, emis, subscriptions } = useTransactions();
+  const [showAll, setShowAll] = useState(false);
 
   // Calculate current balance
   const currentBalance = transactions.reduce((acc, transaction) => {
     return transaction.type === 'income' ? acc + transaction.amount : acc - transaction.amount;
   }, 0);
+  // Calculate total income
+  const totalIncome = transactions
+    .filter(tx => tx.type === 'income')
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  // Calculate total expenses
+  const totalExpense = transactions
+    .filter(tx => tx.type === 'expense' || tx.type === 'subscription' || tx.type === 'lend' || tx.type === 'investment')
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
-  // Get recent transactions (last 5)
+  const savedpercent = Math.round((totalIncome - totalExpense) / totalIncome * 100);
+
+    // Get recent transactions (last 5)
   const recentTransactions = transactions.slice(0, 5);
-
-  // Get upcoming due dates (next 7 days)
-  const today = new Date();
-  const next7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+  //const displayedTransactions = showAllTransactions ? transactions : transactions.slice(0, 5);
+    // Get upcoming due dates (next 7 days)
+    const today = new Date();
+    const next7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
   
   const upcomingEMIs = emis.filter(emi => {
     const dueDate = new Date(emi.nextDueDate);
@@ -45,6 +59,15 @@ export function Dashboard() {
     });
   };
 
+    if (showAll) {
+      return (
+        <AllTransactionsPage
+          transactions={transactions}
+          onBack={() => setShowAll(false)}
+        />
+      );
+    }
+
   return (
     <div className="min-h-full bg-white">
       {/* Header Section */}
@@ -67,11 +90,25 @@ export function Dashboard() {
               <p className="text-3xl text-white">{formatCurrency(currentBalance)}</p>
             </div>
             <div className="text-right">
-              <div className="flex items-center text-green-300 mb-1">
-                <TrendingUp size={16} className="mr-1" />
-                <span className="text-sm">+5.2%</span>
-              </div>
-              <p className="text-xs text-white/60">This month</p>
+              <div
+  style={{
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '0.25rem', // mb-1
+    color: totalExpense > totalIncome ? '#E62727' : '#67C090', // text-red-300 / text-green-300
+  }}
+>
+  {totalExpense > totalIncome ? (
+    <TrendingDown size={16} style={{ marginRight: '0.25rem' }} />
+  ) : (
+    <TrendingUp size={16} style={{ marginRight: '0.25rem' }} />
+  )}
+  <span style={{ fontSize: '0.875rem' }}>{Math.abs(savedpercent)}%</span>
+</div>
+<p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>
+  {totalExpense > totalIncome ? 'Overspent this month' : 'Saved this month'}
+</p>
+
             </div>
           </div>
         </div>
@@ -87,7 +124,7 @@ export function Dashboard() {
               </div>
               <div>
                 <p className="text-gray-500 text-sm">Income</p>
-                <p className="text-lg text-gray-900">₹52,000</p>
+                <p className="text-lg text-gray-900">{formatCurrency(totalIncome)}</p>
               </div>
             </div>
           </div>
@@ -99,7 +136,7 @@ export function Dashboard() {
               </div>
               <div>
                 <p className="text-gray-500 text-sm">Expenses</p>
-                <p className="text-lg text-gray-900">₹28,500</p>
+                <p className="text-lg text-gray-900">{formatCurrency(totalExpense)}</p>
               </div>
             </div>
           </div>
@@ -107,43 +144,58 @@ export function Dashboard() {
 
         {/* Recent Transactions */}
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg text-gray-900">Recent Transactions</h3>
-            <button className="text-indigo-600 text-sm">See All</button>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="p-4 space-y-4">
-              {recentTransactions.map((transaction, index) => (
-                <div key={transaction.id} className={`flex items-center justify-between ${
-                  index !== recentTransactions.length - 1 ? 'pb-4 border-b border-gray-100' : ''
-                }`}>
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                      transaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
-                    }`}>
-                      {transaction.type === 'income' ? 
-                        <TrendingUp size={20} className="text-green-600" /> : 
-                        <TrendingDown size={20} className="text-red-600" />
-                      }
-                    </div>
-                    <div>
-                      <p className="text-gray-900">{transaction.category}</p>
-                      <p className="text-sm text-gray-500">{transaction.description}</p>
-                    </div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg text-gray-900">Recent Transactions</h3>
+            <button
+            className="text-indigo-600 text-sm"
+            onClick={() => setShowAll(true)}
+            >
+              See All
+            </button>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+          <div className="p-4 space-y-4">
+            {recentTransactions.map((tx, index) => (
+              <div
+                key={tx.id}
+                className={`flex items-center justify-between ${
+                  index !== recentTransactions.length - 1 ? "pb-4 border-b border-gray-100" : ""
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <div
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                      tx.type === "income" ? "bg-green-100" : "bg-red-100"
+                    }`}
+                  >
+                    {tx.type === "income" ? (
+                      <TrendingUp size={20} className="text-green-600" />
+                    ) : (
+                      <TrendingDown size={20} className="text-red-600" />
+                    )}
                   </div>
-                  <div className="text-right">
-                    <p className={`text-lg ${
-                      transaction.type === 'income' ? 'text-green-600' : 'text-gray-900'
-                    }`}>
-                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
-                    </p>
-                    <p className="text-xs text-gray-500">{formatDate(transaction.date)}</p>
+                  <div>
+                    <p className="text-gray-900">{tx.category}</p>
+                    <p className="text-sm text-gray-500">{tx.description}</p>
                   </div>
                 </div>
-              ))}
-            </div>
+                <div className="text-right">
+                  <p
+                    className={`text-lg ${
+                      tx.type === "income" ? "text-green-600" : "text-gray-900"
+                    }`}
+                  >
+                    {tx.type === "income" ? "+" : "-"}
+                    {formatCurrency(tx.amount)}
+                  </p>
+                  <p className="text-xs text-gray-500">{formatDate(tx.date)}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+      </div>
+
 
         {/* Investment & Lending Overview */}
         <div className="mb-6">

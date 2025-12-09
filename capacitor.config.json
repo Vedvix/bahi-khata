@@ -1,0 +1,15 @@
+{
+  "appId": "com.example.app",
+  "appName": "BahiKhata",
+  "webDir": "build",
+  "plugins": {
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      
+      "webClientId": "213331984531-ths23gucsrfq07frku62on877k2jb7a8.apps.googleusercontent.com", 
+      "androidClientId": "213331984531-androidclientid.apps.googleusercontent.com", 
+      
+      "forceCodeForRefreshToken": true 
+    }
+  }
+}
