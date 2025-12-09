@@ -236,28 +236,36 @@ export default function AuthPage() {
     console.error("Google Login Failed.");
   };
 
-  // --- Handler for Mobile/Capacitor Google Sign-In ---
   const handleMobileGoogleLogin = async () => {
     setError("");
     try {
-      // Use the native plugin's sign-in method
-      const result = await GoogleAuth.signIn(); 
-      
-      // The ID token is nested in the result object for this plugin
-      const idToken = result.authentication.idToken;
+      console.log("Initializing GoogleAuth plugin...");
 
-      if (idToken) {
-        // Pass the ID token to your existing, browser-safe context function
-        await googleLoginFn(idToken);
-      } else {
-        throw new Error("ID Token not received from native Google Sign-In.");
+      await GoogleAuth.initialize({
+        clientId: "213331984531-androidclientid.apps.googleusercontent.com",
+        scopes: ["profile", "email"],
+        grantOfflineAccess: true, // if you need server auth code
+      });
+
+      console.log("Calling native GoogleAuth.signIn()");
+      const result = await GoogleAuth.signIn();
+      console.log("Raw GoogleAuth result:", JSON.stringify(result, null, 2));
+
+      const idToken = result?.authentication?.idToken;
+      if (!idToken) {
+        console.error("No idToken found in plugin result:", result);
+        setError("Google Sign-in failed: no token returned.");
+        return;
       }
+
+      await googleLoginFn(idToken); // send to backend
     } catch (e: any) {
-      // User cancelled or a native error occurred
-      console.error('Mobile Google Sign-In error:', e);
-      setError("Mobile sign-in failed. Did you configure your Android/iOS client ID?");
+      console.error("Mobile Google Sign-In error:", e);
+      setError(e?.message || "Mobile sign-in failed. Check logs.");
     }
   };
+
+
 
   return (
     <div

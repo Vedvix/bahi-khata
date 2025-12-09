@@ -5,10 +5,11 @@
   "plugins": {
     "GoogleAuth": {
       "scopes": ["profile", "email"],
-      "webClientId": "213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com", 
-      "androidClientId": "213331984531-7mt2o3qn2pc2m3o2e91b6t4dorkhiicj.apps.googleusercontent.com", 
+      
+      "webClientId": "213331984531-ths23gucsrfq07frku62on877k2jb7a8.apps.googleusercontent.com", 
+      "androidClientId": "213331984531-androidclientid.apps.googleusercontent.com", 
+      
       "forceCodeForRefreshToken": true 
     }
   }
-
 }
